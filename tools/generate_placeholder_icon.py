@@ -16,6 +16,15 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
+# Pillow 10+ moved resampling filters under Image.Resampling; provide a compatible alias
+try:
+    from PIL.Image import Resampling as _Resampling  # type: ignore[attr-defined]
+
+    RESAMPLE_LANCZOS = _Resampling.LANCZOS
+except (ImportError, AttributeError):  # pragma: no cover
+    # Older Pillow exposes LANCZOS directly on Image
+    RESAMPLE_LANCZOS = getattr(Image, "LANCZOS", getattr(Image, "BICUBIC", Image.NEAREST))
+
 ROOT = Path(__file__).resolve().parents[1]
 OUT_1024 = ROOT / "icon-1024.png"
 OUT_PNG = ROOT / "icon.png"
@@ -72,16 +81,17 @@ def _pick_font(px: int) -> ImageFont.ImageFont:
         try:
             if os.path.isfile(path):
                 return ImageFont.truetype(path, px)
-        except Exception:
+        except OSError:
             pass
     # Fallback
     try:
         return ImageFont.truetype("DejaVuSans-Bold.ttf", px)
-    except Exception:
+    except OSError:
         return ImageFont.load_default()
 
 
 def make_master(size: int = 1024) -> Image.Image:
+    """Generate the master RGBA icon image of the requested size."""
     # Background with rounded gradient card
     bg = _vertical_gradient(size)
     mask = _rounded_mask(size, RADIUS)
@@ -116,16 +126,17 @@ def make_master(size: int = 1024) -> Image.Image:
 
 
 def main() -> None:
+    """Generate icon files (PNG/ICO) into the project root."""
     img1024 = make_master(1024)
     img1024.save(OUT_1024)
 
     # Export a 256px PNG for window icon
-    img256 = img1024.resize((256, 256), Image.LANCZOS)
+    img256 = img1024.resize((256, 256), RESAMPLE_LANCZOS)
     img256.save(OUT_PNG)
 
     # Export ICO multi-size
     sizes = [(256, 256), (128, 128), (64, 64), (48, 48), (32, 32), (24, 24), (16, 16)]
-    imgs = [img1024.resize(sz, Image.LANCZOS) for sz in sizes]
+    imgs = [img1024.resize(sz, RESAMPLE_LANCZOS) for sz in sizes]
     # Pillow uses the first image as base; "save" supports list of sizes
     imgs[0].save(OUT_ICO, sizes=sizes)
 

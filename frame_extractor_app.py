@@ -11,8 +11,6 @@ import customtkinter
 import cv2  # pylint: disable=import-error
 
 __version__ = "1.0.0"
-# Alias OpenCV error type for safe exception catching even when stubs are missing
-CV2Error = getattr(cv2, "error", Exception)
 
 # Embedded fallback MIT license text (used if LICENSE file cannot be read)
 MIT_LICENSE_FALLBACK = (
@@ -226,7 +224,7 @@ class FrameExtractorApp:
         file_path = filedialog.askopenfilename(
             title="Select Video File",
             filetypes=(
-                ("Video files", "*.mp4;*.mkv;*.webm;*.mov;" "*.avi;*.wmv;*.flv"),
+                ("Video files", "*.mp4;*.mkv;*.webm;*.mov;*.avi;*.wmv;*.flv"),
                 ("All files", "*.*"),
             ),
         )
@@ -260,7 +258,7 @@ class FrameExtractorApp:
                 error_message = f"Status: File error - {str(e_fs)}"
                 self.status_label.configure(text=error_message)
                 self.total_frames = None
-            except CV2Error as e_gen:
+            except cv2.error as e_gen:  # type: ignore[attr-defined]
                 self.total_frames_label.configure(text="Total Frames: Error")
                 error_message = f"Status: Error reading video details - {str(e_gen)}"
                 self.status_label.configure(text=error_message)
@@ -379,7 +377,7 @@ class FrameExtractorApp:
         """Bind a simple hover tooltip to a widget."""
 
         def enter(_event):
-            tw = getattr(widget, "_tipwindow", None)
+            tw = getattr(widget, "tooltip_window", None)
             if tw:
                 return
             tw = tk.Toplevel(widget)
@@ -398,13 +396,13 @@ class FrameExtractorApp:
                 pady=3,
             )
             lbl.pack()
-            widget._tipwindow = tw
+            widget.tooltip_window = tw  # type: ignore[attr-defined]
 
         def leave(_event):
-            tw = getattr(widget, "_tipwindow", None)
+            tw = getattr(widget, "tooltip_window", None)
             if tw:
                 tw.destroy()
-                widget._tipwindow = None
+                widget.tooltip_window = None  # type: ignore[attr-defined]
 
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
@@ -618,7 +616,7 @@ class FrameExtractorApp:
                     else:
                         try:
                             ok = cv2.imwrite(frame_filename, image)  # pylint: disable=no-member
-                        except (CV2Error, OSError) as e_write:
+                        except (cv2.error, OSError) as e_write:  # type: ignore[attr-defined]
                             ok = False
                             error_message = f"Status: File write error - {str(e_write)}"
                         if not ok:
@@ -684,10 +682,10 @@ class FrameExtractorApp:
                         lambda: self.open_output_button.configure(state=tk.NORMAL),
                     )
         except OSError as e_io:
-            io_error_text = "Status: File Error - " f"{str(e_io)}"
+            io_error_text = f"Status: File Error - {e_io}"
             self.root.after(0, lambda text=io_error_text: self._update_status(text))
-        except CV2Error as e:
-            general_error_text = "Status: Error - " f"{str(e)}"
+        except cv2.error as e:  # type: ignore[attr-defined]
+            general_error_text = f"Status: Error - {e}"
             self.root.after(0, lambda text=general_error_text: self._update_status(text))
         finally:
             # Ensure capture is released even on early exit or exception
