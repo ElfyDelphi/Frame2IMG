@@ -10,6 +10,27 @@ import cv2  # pylint: disable=import-error
 
 __version__ = "1.0.0"
 
+# Embedded fallback MIT license text (used if LICENSE file cannot be read)
+MIT_LICENSE_FALLBACK = (
+    "MIT License\n\n"
+    "Copyright (c) 2025 ElfyDelphi\n\n"
+    "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
+    "of this software and associated documentation files (the \"Software\"), to deal\n"
+    "in the Software without restriction, including without limitation the rights\n"
+    "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
+    "copies of the Software, and to permit persons to whom the Software is\n"
+    "furnished to do so, subject to the following conditions:\n\n"
+    "The above copyright notice and this permission notice shall be included in all\n"
+    "copies or substantial portions of the Software.\n\n"
+    "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n"
+    "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
+    "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n"
+    "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
+    "LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n"
+    "OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n"
+    "SOFTWARE.\n"
+)
+
 class FrameExtractorApp:
     """Main application class for the Video Frame Extractor."""
     def __init__(self, root):
@@ -375,7 +396,7 @@ class FrameExtractorApp:
         btn_row = customtkinter.CTkFrame(content, fg_color="transparent")
         btn_row.pack(pady=(10, 0), fill="x")
         lic_btn = customtkinter.CTkButton(
-            btn_row, text="View License", command=self._open_license
+            btn_row, text="View License", command=self._show_license_dialog
         )
         lic_btn.pack(side=tk.LEFT)
         close_btn = customtkinter.CTkButton(btn_row, text="Close", command=win.destroy)
@@ -389,6 +410,54 @@ class FrameExtractorApp:
             win.geometry(f"+{x}+{y}")
         except tk.TclError:
             # If geometry queries fail, it's safe to skip centering
+            pass
+
+    def _get_license_text(self) -> str:
+        """Return the LICENSE text; fallback to embedded MIT text if file missing/unreadable."""
+        lic_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LICENSE")
+        try:
+            with open(lic_path, "r", encoding="utf-8") as f:
+                return f.read()
+        except OSError:
+            return MIT_LICENSE_FALLBACK
+
+    def _show_license_dialog(self):
+        """Show an embedded license viewer window with scrollable text."""
+        win = customtkinter.CTkToplevel(self.root)
+        win.title("License — Frame2IMG")
+        # Provide a reasonable default size for reading
+        try:
+            win.geometry("760x520")
+        except tk.TclError:
+            pass
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+
+        container = customtkinter.CTkFrame(win, fg_color="transparent")
+        container.pack(padx=14, pady=14, fill="both", expand=True)
+
+        # Scrollable text area
+        text_box = customtkinter.CTkTextbox(container, wrap="word")
+        text_box.pack(fill="both", expand=True)
+        text_box.insert("1.0", self._get_license_text())
+        text_box.configure(state="disabled")
+
+        btn_row = customtkinter.CTkFrame(container, fg_color="transparent")
+        btn_row.pack(fill="x", pady=(8, 0))
+        open_file_btn = customtkinter.CTkButton(btn_row, text="Open LICENSE file", command=self._open_license)
+        open_file_btn.pack(side=tk.LEFT)
+        close_btn = customtkinter.CTkButton(btn_row, text="Close", command=win.destroy)
+        close_btn.pack(side=tk.LEFT, padx=(10, 0))
+
+        # Center relative to root
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win.winfo_width() // 2)
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win.winfo_height() // 2)
+            win.geometry(f"+{x}+{y}")
+        except tk.TclError:
             pass
 
     def _open_license(self):

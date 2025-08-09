@@ -16,6 +16,7 @@ Built with Python, CustomTkinter for UI, and OpenCV for video processing.
 - Option to skip existing files (merge with previous runs, auto-increments zero-padding digits to 6 for safer naming)
 - Configurable zero-padding digits
 - Top-right “?” About button with View License
+- Embedded license viewer (About → View License) with fallback
 
 ## Requirements
 
