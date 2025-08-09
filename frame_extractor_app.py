@@ -1,10 +1,12 @@
 """Video Frame Extractor GUI application using customtkinter and OpenCV."""
+
 import os
+import subprocess
 import sys
 import threading
-import subprocess
 import tkinter as tk  # For filedialog
 from tkinter import filedialog, messagebox
+
 import customtkinter
 import cv2  # pylint: disable=import-error
 
@@ -17,14 +19,14 @@ MIT_LICENSE_FALLBACK = (
     "MIT License\n\n"
     "Copyright (c) 2025 ElfyDelphi\n\n"
     "Permission is hereby granted, free of charge, to any person obtaining a copy\n"
-    "of this software and associated documentation files (the \"Software\"), to deal\n"
+    'of this software and associated documentation files (the "Software"), to deal\n'
     "in the Software without restriction, including without limitation the rights\n"
     "to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n"
     "copies of the Software, and to permit persons to whom the Software is\n"
     "furnished to do so, subject to the following conditions:\n\n"
     "The above copyright notice and this permission notice shall be included in all\n"
     "copies or substantial portions of the Software.\n\n"
-    "THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n"
+    'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n'
     "IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n"
     "FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n"
     "AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n"
@@ -33,19 +35,21 @@ MIT_LICENSE_FALLBACK = (
     "SOFTWARE.\n"
 )
 
+
 class FrameExtractorApp:
     """Main application class for the Video Frame Extractor."""
+
     def __init__(self, root):
         """Initialize the application UI and components."""
         customtkinter.set_appearance_mode("dark")  # Modes: "System" (default), "Light", "Dark"
         customtkinter.set_default_color_theme("blue")  # Themes: blue, green, dark-blue
         self.root = root
         self.root.title(f"Frame2IMG v{__version__} — Video Frame Extractor")
-        self.root.geometry("700x420") # Initial size, wider for options
+        self.root.geometry("700x420")  # Initial size, wider for options
         # Try to set window icon (ICO on Windows; PNG fallback elsewhere)
         candidates = self._candidate_icon_paths()
         icon_ico = next(
-            (p for p in candidates if p.lower().endswith('.ico') and os.path.exists(p)),
+            (p for p in candidates if p.lower().endswith(".ico") and os.path.exists(p)),
             None,
         )
         if icon_ico:
@@ -55,7 +59,7 @@ class FrameExtractorApp:
                 icon_ico = None  # fall through to PNG
         if not icon_ico:
             icon_png = next(
-                (p for p in candidates if p.lower().endswith('.png') and os.path.exists(p)),
+                (p for p in candidates if p.lower().endswith(".png") and os.path.exists(p)),
                 None,
             )
             if icon_png:
@@ -92,8 +96,9 @@ class FrameExtractorApp:
 
         # self.total_frames_label will be in control_frame now
 
-        self.select_video_button = customtkinter.CTkButton(input_frame, text="Select Video",
-                                                           command=self.select_video_file)
+        self.select_video_button = customtkinter.CTkButton(
+            input_frame, text="Select Video", command=self.select_video_file
+        )
         self.select_video_button.pack(side=tk.RIGHT, padx=5, pady=5)
 
         # Frame for output folder selection
@@ -103,22 +108,22 @@ class FrameExtractorApp:
         self.output_path_label = customtkinter.CTkLabel(output_frame, text="No folder selected")
         self.output_path_label.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
 
-        self.select_output_button = customtkinter.CTkButton(output_frame, text="Select Folder",
-                                                            command=self.select_output_folder)
+        self.select_output_button = customtkinter.CTkButton(
+            output_frame, text="Select Folder", command=self.select_output_folder
+        )
         self.select_output_button.pack(side=tk.RIGHT, padx=5, pady=5)
 
         # Frame for controls
-        control_frame = customtkinter.CTkFrame(self.root, fg_color="transparent") # Transparent bg
+        control_frame = customtkinter.CTkFrame(self.root, fg_color="transparent")  # Transparent bg
         control_frame.pack(padx=10, pady=10, fill="x")
 
         self.total_frames_label = customtkinter.CTkLabel(control_frame, text="Total Frames: N/A")
-        self.total_frames_label.pack(side=tk.LEFT, padx=(0, 20), pady=5) # Right padding
+        self.total_frames_label.pack(side=tk.LEFT, padx=(0, 20), pady=5)  # Right padding
 
-        self.start_button = customtkinter.CTkButton(control_frame,
-                                                      text="Start Processing",
-                                                      command=self.start_processing,
-                                                      state=tk.DISABLED)
-        self.start_button.pack(side=tk.LEFT, pady=5) # Pack next to the label
+        self.start_button = customtkinter.CTkButton(
+            control_frame, text="Start Processing", command=self.start_processing, state=tk.DISABLED
+        )
+        self.start_button.pack(side=tk.LEFT, pady=5)  # Pack next to the label
 
         # Cancel button (enabled only while processing)
         self.cancel_button = customtkinter.CTkButton(
@@ -150,7 +155,9 @@ class FrameExtractorApp:
         options_prefix_label = customtkinter.CTkLabel(options_row, text="Prefix:")
         options_prefix_label.pack(side=tk.LEFT, padx=(20, 5))
         self.prefix_var = tk.StringVar(value="frame_")
-        self.prefix_entry = customtkinter.CTkEntry(options_row, width=120, textvariable=self.prefix_var)
+        self.prefix_entry = customtkinter.CTkEntry(
+            options_row, width=120, textvariable=self.prefix_var
+        )
         self.prefix_entry.pack(side=tk.LEFT, padx=(0, 20))
 
         # Skip existing files
@@ -173,13 +180,15 @@ class FrameExtractorApp:
         options_digits_label = customtkinter.CTkLabel(options_row, text="Digits:")
         options_digits_label.pack(side=tk.LEFT, padx=(20, 5))
         self.digits_var = tk.StringVar(value="5")
-        self.digits_entry = customtkinter.CTkEntry(options_row, width=60, textvariable=self.digits_var)
+        self.digits_entry = customtkinter.CTkEntry(
+            options_row, width=60, textvariable=self.digits_var
+        )
         self.digits_entry.pack(side=tk.LEFT)
         # Tooltip for digits
         self._bind_tooltip(
             self.digits_entry,
             "Zero-padding digits (1–12). Default is 5; "
-            "becomes 6 when 'Skip existing' is enabled."
+            "becomes 6 when 'Skip existing' is enabled.",
         )
         # Track if user manually edited digits (prevents auto-bump overrides)
         self._digits_user_changed = False
@@ -207,20 +216,17 @@ class FrameExtractorApp:
         # Initialize attributes that are later set in start_processing()
         # This quiets lint about attributes defined outside __init__.
         self.frame_interval = 1
-        self.output_format_current = 'PNG'
-        self.filename_prefix_current = 'frame_'
+        self.output_format_current = "PNG"
+        self.filename_prefix_current = "frame_"
         self.skip_existing_current = False
         self.name_pad = 5
-
 
     def select_video_file(self):
         """Open a dialog to select the input video file."""
         file_path = filedialog.askopenfilename(
             title="Select Video File",
             filetypes=(
-                ("Video files",
-                 "*.mp4;*.mkv;*.webm;*.mov;"
-                 "*.avi;*.wmv;*.flv"),
+                ("Video files", "*.mp4;*.mkv;*.webm;*.mov;" "*.avi;*.wmv;*.flv"),
                 ("All files", "*.*"),
             ),
         )
@@ -249,7 +255,7 @@ class FrameExtractorApp:
                     self.status_label.configure(text="Status: Error opening video for frame count.")
                     self.total_frames = None
                     cap.release()
-            except (OSError, IOError, ValueError) as e_fs:
+            except (OSError, ValueError) as e_fs:
                 self.total_frames_label.configure(text="Total Frames: Error")
                 error_message = f"Status: File error - {str(e_fs)}"
                 self.status_label.configure(text=error_message)
@@ -261,7 +267,7 @@ class FrameExtractorApp:
                 self.total_frames = None
 
         else:
-            self.video_file_path = "" # Clear path if selection cancelled
+            self.video_file_path = ""  # Clear path if selection cancelled
             self.video_path_label.configure(text="No video selected")
             self.total_frames_label.configure(text="Total Frames: N/A")
             self.status_label.configure(text="Status: Video selection cancelled")
@@ -335,7 +341,7 @@ class FrameExtractorApp:
         if s == "":
             default_val = (
                 "6"
-                if (hasattr(self, 'skip_existing_var') and bool(self.skip_existing_var.get()))
+                if (hasattr(self, "skip_existing_var") and bool(self.skip_existing_var.get()))
                 else "5"
             )
             self.digits_var.set(default_val)
@@ -343,7 +349,11 @@ class FrameExtractorApp:
         try:
             v = int(s)
         except (ValueError, TypeError):
-            default_val = "6" if (hasattr(self, 'skip_existing_var') and bool(self.skip_existing_var.get())) else "5"
+            default_val = (
+                "6"
+                if (hasattr(self, "skip_existing_var") and bool(self.skip_existing_var.get()))
+                else "5"
+            )
             self.digits_var.set(default_val)
             return
         # Clamp to 1–12
@@ -367,6 +377,7 @@ class FrameExtractorApp:
 
     def _bind_tooltip(self, widget, text: str):
         """Bind a simple hover tooltip to a widget."""
+
         def enter(_event):
             tw = getattr(widget, "_tipwindow", None)
             if tw:
@@ -387,12 +398,14 @@ class FrameExtractorApp:
                 pady=3,
             )
             lbl.pack()
-            setattr(widget, "_tipwindow", tw)
+            widget._tipwindow = tw
+
         def leave(_event):
             tw = getattr(widget, "_tipwindow", None)
             if tw:
                 tw.destroy()
-                setattr(widget, "_tipwindow", None)
+                widget._tipwindow = None
+
         widget.bind("<Enter>", enter)
         widget.bind("<Leave>", leave)
 
@@ -431,16 +444,8 @@ class FrameExtractorApp:
         # Center the dialog over the root
         win.update_idletasks()
         try:
-            x = (
-                self.root.winfo_x()
-                + (self.root.winfo_width() // 2)
-                - (win.winfo_width() // 2)
-            )
-            y = (
-                self.root.winfo_y()
-                + (self.root.winfo_height() // 2)
-                - (win.winfo_height() // 2)
-            )
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win.winfo_width() // 2)
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win.winfo_height() // 2)
             win.geometry(f"+{x}+{y}")
         except tk.TclError:
             # If geometry queries fail, it's safe to skip centering
@@ -483,7 +488,7 @@ class FrameExtractorApp:
         """Return the LICENSE text; fallback to embedded MIT text if file missing/unreadable."""
         for lic_path in self._candidate_license_paths():
             try:
-                with open(lic_path, "r", encoding="utf-8") as f:
+                with open(lic_path, encoding="utf-8") as f:
                     return f.read()
             except OSError:
                 continue
@@ -526,16 +531,8 @@ class FrameExtractorApp:
         # Center relative to root
         win.update_idletasks()
         try:
-            x = (
-                self.root.winfo_x()
-                + (self.root.winfo_width() // 2)
-                - (win.winfo_width() // 2)
-            )
-            y = (
-                self.root.winfo_y()
-                + (self.root.winfo_height() // 2)
-                - (win.winfo_height() // 2)
-            )
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win.winfo_width() // 2)
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win.winfo_height() // 2)
             win.geometry(f"+{x}+{y}")
         except tk.TclError:
             pass
@@ -546,16 +543,18 @@ class FrameExtractorApp:
         for lic_path in self._candidate_license_paths():
             if os.path.exists(lic_path):
                 try:
-                    if os.name == 'nt':
+                    if os.name == "nt":
                         os.startfile(lic_path)  # type: ignore[attr-defined]
-                    elif sys.platform == 'darwin':
-                        subprocess.Popen(['open', lic_path])
+                    elif sys.platform == "darwin":
+                        subprocess.Popen(["open", lic_path])
                     else:
-                        subprocess.Popen(['xdg-open', lic_path])
+                        subprocess.Popen(["xdg-open", lic_path])
                 except OSError as e:
                     messagebox.showerror("License", f"Error opening LICENSE: {e}")
                 return
-        messagebox.showwarning("License", "LICENSE file not found. Use the embedded viewer in About.")
+        messagebox.showwarning(
+            "License", "LICENSE file not found. Use the embedded viewer in About."
+        )
 
     def _sanitize_prefix(self, prefix: str) -> str:
         """Sanitize filename prefix by removing invalid path characters.
@@ -566,7 +565,7 @@ class FrameExtractorApp:
         s = prefix.strip()
         # Replace characters invalid on Windows and common platforms
         invalid = '<>:"/\\|?*\n\r\t'
-        trans = str.maketrans({ch: '_' for ch in invalid})
+        trans = str.maketrans({ch: "_" for ch in invalid})
         s = s.translate(trans)
         return s if s else "frame_"
 
@@ -600,21 +599,20 @@ class FrameExtractorApp:
                 if self.cancel_event is not None and self.cancel_event.is_set():
                     break
                 # Save according to interval
-                if frame_index % max(getattr(self, 'frame_interval', 1), 1) == 0:
+                if frame_index % max(getattr(self, "frame_interval", 1), 1) == 0:
                     # Always write PNG
-                    filename_ext = 'png'
-                    pad = int(getattr(self, 'name_pad', 5))
-                    prefix = getattr(self, 'filename_prefix_current', 'frame_')
+                    filename_ext = "png"
+                    pad = int(getattr(self, "name_pad", 5))
+                    prefix = getattr(self, "filename_prefix_current", "frame_")
                     index_for_name = (
                         frame_index
-                        if bool(getattr(self, 'skip_existing_current', False))
+                        if bool(getattr(self, "skip_existing_current", False))
                         else saved_count
                     )
                     name_formatted = f"{prefix}{index_for_name:0{pad}d}.{filename_ext}"
                     frame_filename = os.path.join(self.output_folder_path, name_formatted)
-                    if (
-                        bool(getattr(self, 'skip_existing_current', False))
-                        and os.path.exists(frame_filename)
+                    if bool(getattr(self, "skip_existing_current", False)) and os.path.exists(
+                        frame_filename
                     ):
                         pass
                     else:
@@ -662,7 +660,9 @@ class FrameExtractorApp:
                         lambda: self.open_output_button.configure(state=tk.NORMAL),
                     )
             elif self.cancel_event is not None and self.cancel_event.is_set():
-                cancel_text = f"Status: Cancelled. Saved {saved_count} frames to {self.output_folder_path}"
+                cancel_text = (
+                    f"Status: Cancelled. Saved {saved_count} frames to {self.output_folder_path}"
+                )
                 self.root.after(0, lambda text=cancel_text: self._update_status(text))
                 if saved_count > 0:
                     self.root.after(
@@ -682,21 +682,15 @@ class FrameExtractorApp:
                         0,
                         lambda: self.open_output_button.configure(state=tk.NORMAL),
                     )
-        except (OSError, IOError) as e_io:
-            io_error_text = (
-                "Status: File Error - "
-                f"{str(e_io)}"
-            )
+        except OSError as e_io:
+            io_error_text = "Status: File Error - " f"{str(e_io)}"
             self.root.after(0, lambda text=io_error_text: self._update_status(text))
         except CV2Error as e:
-            general_error_text = (
-                "Status: Error - "
-                f"{str(e)}"
-            )
+            general_error_text = "Status: Error - " f"{str(e)}"
             self.root.after(0, lambda text=general_error_text: self._update_status(text))
         finally:
             # Ensure capture is released even on early exit or exception
-            if 'video_capture' in locals() and video_capture is not None:
+            if "video_capture" in locals() and video_capture is not None:
                 video_capture.release()
             # Stop indeterminate animation if running
             self.root.after(0, self.progress_bar.stop)
@@ -706,16 +700,16 @@ class FrameExtractorApp:
             self.root.after(0, lambda: self.select_video_button.configure(state=tk.NORMAL))
             self.root.after(0, lambda: self.select_output_button.configure(state=tk.NORMAL))
             # Format is fixed; no control to re-enable
-            if hasattr(self, 'prefix_entry'):
+            if hasattr(self, "prefix_entry"):
                 self.root.after(0, lambda: self.prefix_entry.configure(state=tk.NORMAL))
-            if hasattr(self, 'skip_existing_checkbox'):
+            if hasattr(self, "skip_existing_checkbox"):
                 self.root.after(0, lambda: self.skip_existing_checkbox.configure(state=tk.NORMAL))
-            if hasattr(self, 'digits_entry'):
+            if hasattr(self, "digits_entry"):
                 self.root.after(0, lambda: self.digits_entry.configure(state=tk.NORMAL))
             # cleanup event
             self.cancel_event = None
             # If user requested close during processing, close now
-            if getattr(self, '_close_after_cancel', False):
+            if getattr(self, "_close_after_cancel", False):
                 self.root.after(0, self.root.destroy)
 
     def open_output_folder(self):
@@ -725,12 +719,12 @@ class FrameExtractorApp:
             return
         try:
             path = self.output_folder_path
-            if os.name == 'nt':
+            if os.name == "nt":
                 os.startfile(path)  # type: ignore[attr-defined]
-            elif sys.platform == 'darwin':
-                subprocess.Popen(['open', path])
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", path])
             else:
-                subprocess.Popen(['xdg-open', path])
+                subprocess.Popen(["xdg-open", path])
         except OSError as e:
             self.status_label.configure(text=f"Status: Error opening folder - {e}")
 
@@ -747,9 +741,7 @@ class FrameExtractorApp:
                 f.write(b"0")
             os.remove(test_path)
         except OSError as e:
-            self.status_label.configure(
-                text=f"Status: Error - Output folder not writable: {e}"
-            )
+            self.status_label.configure(text=f"Status: Error - Output folder not writable: {e}")
             return
 
         self.status_label.configure(text="Status: Processing...")
@@ -759,11 +751,11 @@ class FrameExtractorApp:
         self.select_video_button.configure(state=tk.DISABLED)
         self.select_output_button.configure(state=tk.DISABLED)
         self.open_output_button.configure(state=tk.DISABLED)
-        if hasattr(self, 'prefix_entry'):
+        if hasattr(self, "prefix_entry"):
             self.prefix_entry.configure(state=tk.DISABLED)
-        if hasattr(self, 'skip_existing_checkbox'):
+        if hasattr(self, "skip_existing_checkbox"):
             self.skip_existing_checkbox.configure(state=tk.DISABLED)
-        if hasattr(self, 'digits_entry'):
+        if hasattr(self, "digits_entry"):
             self.digits_entry.configure(state=tk.DISABLED)
 
         # Prepare cancellation event
@@ -773,23 +765,25 @@ class FrameExtractorApp:
         self.frame_interval = 1
 
         # Output format is fixed to PNG (lossless)
-        self.output_format_current = 'PNG'
+        self.output_format_current = "PNG"
 
         # Filename prefix and skip-existing behavior
-        raw_prefix = self.prefix_var.get() if hasattr(self, 'prefix_var') else 'frame_'
+        raw_prefix = self.prefix_var.get() if hasattr(self, "prefix_var") else "frame_"
         sanitized_prefix = self._sanitize_prefix(raw_prefix)
         if not sanitized_prefix or (isinstance(raw_prefix, str) and raw_prefix.strip() == ""):
             # Default to video basename + '_' when available
-            base = os.path.splitext(os.path.basename(getattr(self, 'video_file_path', '') or ''))[0]
+            base = os.path.splitext(os.path.basename(getattr(self, "video_file_path", "") or ""))[0]
             if base:
                 derived = f"{base}_"
                 sanitized_prefix = self._sanitize_prefix(derived)
-        self.filename_prefix_current = sanitized_prefix if sanitized_prefix else 'frame_'
-        self.skip_existing_current = bool(self.skip_existing_var.get()) if hasattr(self, 'skip_existing_var') else False
+        self.filename_prefix_current = sanitized_prefix if sanitized_prefix else "frame_"
+        self.skip_existing_current = (
+            bool(self.skip_existing_var.get()) if hasattr(self, "skip_existing_var") else False
+        )
         # Determine zero-padding digits
         digits_val = None
         try:
-            digits_val = int(self.digits_var.get()) if hasattr(self, 'digits_var') else None
+            digits_val = int(self.digits_var.get()) if hasattr(self, "digits_var") else None
         except (ValueError, TypeError):
             digits_val = None
         if digits_val is None or digits_val < 1 or digits_val > 12:
@@ -825,7 +819,6 @@ class FrameExtractorApp:
                 self.status_label.configure(text="Status: Cancelling...")
             return
         self.root.destroy()
-
 
     def update_start_button_state(self):
         """Enable or disable the start button based on path selections."""

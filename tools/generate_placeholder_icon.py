@@ -8,10 +8,11 @@ Outputs:
 Requires: Pillow
 Run: python tools/generate_placeholder_icon.py
 """
+
 from __future__ import annotations
+
 import os
 from pathlib import Path
-from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -20,9 +21,9 @@ OUT_1024 = ROOT / "icon-1024.png"
 OUT_PNG = ROOT / "icon.png"
 OUT_ICO = ROOT / "icon.ico"
 
-BG_TOP = (37, 108, 223, 255)   # #256CDF
-BG_BOTTOM = (23, 71, 155, 255) # #17479B
-FG = (255, 255, 255, 255)      # white text
+BG_TOP = (37, 108, 223, 255)  # #256CDF
+BG_BOTTOM = (23, 71, 155, 255)  # #17479B
+FG = (255, 255, 255, 255)  # white text
 SHADOW = (0, 0, 0, 100)
 RADIUS = 220
 

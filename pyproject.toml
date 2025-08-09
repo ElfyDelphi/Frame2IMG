@@ -1,0 +1,33 @@
+[tool.black]
+line-length = 100
+target-version = ["py38"]
+
+[tool.ruff]
+line-length = 100
+# Python 3.8+ runtime
+target-version = "py38"
+# Keep linting out of build artifacts and virtualenvs
+exclude = [
+  ".git",
+  ".venv",
+  "venv",
+  "build",
+  "dist",
+  "__pycache__",
+]
+
+[tool.ruff.lint]
+# Core rules: pycodestyle (E/W), Pyflakes (F), isort (I), Bandit-like (B), pyupgrade (UP)
+select = ["E", "W", "F", "I", "B", "UP"]
+# If you want to silence line-length in favor of Black, add "E501" here.
+# ignore = ["E501"]
+
+[tool.ruff.isort]
+combine-as-imports = true
+# If/when you refactor into a package (e.g., frame2img/), list it here
+known-first-party = ["frame2img"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["frame2img"]
