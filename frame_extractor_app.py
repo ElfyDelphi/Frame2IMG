@@ -412,14 +412,30 @@ class FrameExtractorApp:
             # If geometry queries fail, it's safe to skip centering
             pass
 
+    def _candidate_license_paths(self):
+        """Return candidate paths where LICENSE may reside (EXE dir, bundle, source dir)."""
+        paths = []
+        # When frozen by PyInstaller, prefer EXE directory and bundled temp dir
+        if getattr(sys, "frozen", False):  # type: ignore[attr-defined]
+            exe_dir = os.path.dirname(sys.executable)
+            paths.append(os.path.join(exe_dir, "LICENSE"))
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                paths.append(os.path.join(meipass, "LICENSE"))
+        # Always include source directory fallback
+        src_dir = os.path.dirname(os.path.abspath(__file__))
+        paths.append(os.path.join(src_dir, "LICENSE"))
+        return paths
+
     def _get_license_text(self) -> str:
         """Return the LICENSE text; fallback to embedded MIT text if file missing/unreadable."""
-        lic_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LICENSE")
-        try:
-            with open(lic_path, "r", encoding="utf-8") as f:
-                return f.read()
-        except OSError:
-            return MIT_LICENSE_FALLBACK
+        for lic_path in self._candidate_license_paths():
+            try:
+                with open(lic_path, "r", encoding="utf-8") as f:
+                    return f.read()
+            except OSError:
+                continue
+        return MIT_LICENSE_FALLBACK
 
     def _show_license_dialog(self):
         """Show an embedded license viewer window with scrollable text."""
@@ -462,19 +478,20 @@ class FrameExtractorApp:
 
     def _open_license(self):
         """Open the LICENSE file with the default system viewer."""
-        lic_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "LICENSE")
-        if not os.path.exists(lic_path):
-            messagebox.showwarning("License", "LICENSE file not found.")
-            return
-        try:
-            if os.name == 'nt':
-                os.startfile(lic_path)  # type: ignore[attr-defined]
-            elif sys.platform == 'darwin':
-                subprocess.Popen(['open', lic_path])
-            else:
-                subprocess.Popen(['xdg-open', lic_path])
-        except OSError as e:
-            messagebox.showerror("License", f"Error opening LICENSE: {e}")
+        # Try candidates in order
+        for lic_path in self._candidate_license_paths():
+            if os.path.exists(lic_path):
+                try:
+                    if os.name == 'nt':
+                        os.startfile(lic_path)  # type: ignore[attr-defined]
+                    elif sys.platform == 'darwin':
+                        subprocess.Popen(['open', lic_path])
+                    else:
+                        subprocess.Popen(['xdg-open', lic_path])
+                except OSError as e:
+                    messagebox.showerror("License", f"Error opening LICENSE: {e}")
+                return
+        messagebox.showwarning("License", "LICENSE file not found. Use the embedded viewer in About.")
 
     def _sanitize_prefix(self, prefix: str) -> str:
         """Sanitize filename prefix by removing invalid path characters.
