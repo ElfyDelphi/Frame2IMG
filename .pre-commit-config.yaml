@@ -8,19 +8,21 @@ repos:
     hooks:
       - id: isort
         name: isort (imports)
-        entry: py -m isort
+        entry: py
         language: system
         types: [python]
+        args: ["-m", "isort"]
 
       - id: black
         name: black (format)
-        entry: py -m black
+        entry: py
         language: system
         types: [python]
+        args: ["-m", "black"]
 
       - id: ruff
         name: ruff (lint, autofix)
-        entry: py -m ruff
+        entry: py
         language: system
         types: [python]
-        args: ["check", "--fix"]
+        args: ["-m", "ruff", "check", "--fix"]
