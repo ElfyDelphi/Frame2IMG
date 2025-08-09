@@ -104,8 +104,6 @@ def make_master(size: int = 1024) -> Image.Image:
     font_size = int(size * 0.54)
     font = _pick_font(font_size)
     # Compute text bbox and center
-    bbox = d.textbbox((0, 0), text, font=font, anchor="lt")
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
     cx = size // 2
     cy = size // 2 + int(size * 0.03)  # slight optical adjustment
     # Shadow

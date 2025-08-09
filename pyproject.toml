@@ -22,7 +22,7 @@ select = ["E", "W", "F", "I", "B", "UP"]
 # If you want to silence line-length in favor of Black, add "E501" here.
 # ignore = ["E501"]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 combine-as-imports = true
 # If/when you refactor into a package (e.g., frame2img/), list it here
 known-first-party = ["frame2img"]

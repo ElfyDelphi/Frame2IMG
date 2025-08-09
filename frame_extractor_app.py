@@ -623,7 +623,8 @@ class FrameExtractorApp:
                             error_message = f"Status: File write error - {str(e_write)}"
                         if not ok:
                             if error_message is None:
-                                error_message = f"Status: Error writing file: {os.path.basename(frame_filename)}"
+                                base_name = os.path.basename(frame_filename)
+                                error_message = f"Status: Error writing file: {base_name}"
                             break
                         saved_count += 1
                 # Update status every 30 saved frames
