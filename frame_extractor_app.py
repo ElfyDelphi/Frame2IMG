@@ -9,6 +9,8 @@ import customtkinter
 import cv2  # pylint: disable=import-error
 
 __version__ = "1.0.0"
+# Alias OpenCV error type for safe exception catching even when stubs are missing
+CV2Error = getattr(cv2, "error", Exception)
 
 # Embedded fallback MIT license text (used if LICENSE file cannot be read)
 MIT_LICENSE_FALLBACK = (
@@ -40,6 +42,30 @@ class FrameExtractorApp:
         self.root = root
         self.root.title(f"Frame2IMG v{__version__} — Video Frame Extractor")
         self.root.geometry("700x420") # Initial size, wider for options
+        # Try to set window icon (ICO on Windows; PNG fallback elsewhere)
+        candidates = self._candidate_icon_paths()
+        icon_ico = next(
+            (p for p in candidates if p.lower().endswith('.ico') and os.path.exists(p)),
+            None,
+        )
+        if icon_ico:
+            try:
+                self.root.iconbitmap(icon_ico)
+            except tk.TclError:
+                icon_ico = None  # fall through to PNG
+        if not icon_ico:
+            icon_png = next(
+                (p for p in candidates if p.lower().endswith('.png') and os.path.exists(p)),
+                None,
+            )
+            if icon_png:
+                try:
+                    _img = tk.PhotoImage(file=icon_png)
+                    self.root.iconphoto(True, _img)
+                    self._icon_image_ref = _img  # prevent GC
+                except tk.TclError:
+                    pass
+
         # Close handling
         self._close_after_cancel = False
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -228,7 +254,7 @@ class FrameExtractorApp:
                 error_message = f"Status: File error - {str(e_fs)}"
                 self.status_label.configure(text=error_message)
                 self.total_frames = None
-            except cv2.error as e_gen:  # pylint: disable=catching-non-exception
+            except CV2Error as e_gen:
                 self.total_frames_label.configure(text="Total Frames: Error")
                 error_message = f"Status: Error reading video details - {str(e_gen)}"
                 self.status_label.configure(text=error_message)
@@ -405,12 +431,38 @@ class FrameExtractorApp:
         # Center the dialog over the root
         win.update_idletasks()
         try:
-            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win.winfo_width() // 2)
-            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win.winfo_height() // 2)
+            x = (
+                self.root.winfo_x()
+                + (self.root.winfo_width() // 2)
+                - (win.winfo_width() // 2)
+            )
+            y = (
+                self.root.winfo_y()
+                + (self.root.winfo_height() // 2)
+                - (win.winfo_height() // 2)
+            )
             win.geometry(f"+{x}+{y}")
         except tk.TclError:
             # If geometry queries fail, it's safe to skip centering
             pass
+
+    def _candidate_icon_paths(self):
+        """Return candidate paths for app icon files (ICO preferred, then PNG)."""
+        paths = []
+        # When frozen by PyInstaller, prefer EXE directory and bundled temp dir
+        if getattr(sys, "frozen", False):  # type: ignore[attr-defined]
+            exe_dir = os.path.dirname(sys.executable)
+            paths.append(os.path.join(exe_dir, "icon.ico"))
+            paths.append(os.path.join(exe_dir, "icon.png"))
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                paths.append(os.path.join(meipass, "icon.ico"))
+                paths.append(os.path.join(meipass, "icon.png"))
+        # Always include source directory fallback
+        src_dir = os.path.dirname(os.path.abspath(__file__))
+        paths.append(os.path.join(src_dir, "icon.ico"))
+        paths.append(os.path.join(src_dir, "icon.png"))
+        return paths
 
     def _candidate_license_paths(self):
         """Return candidate paths where LICENSE may reside (EXE dir, bundle, source dir)."""
@@ -462,7 +514,11 @@ class FrameExtractorApp:
 
         btn_row = customtkinter.CTkFrame(container, fg_color="transparent")
         btn_row.pack(fill="x", pady=(8, 0))
-        open_file_btn = customtkinter.CTkButton(btn_row, text="Open LICENSE file", command=self._open_license)
+        open_file_btn = customtkinter.CTkButton(
+            btn_row,
+            text="Open LICENSE file",
+            command=self._open_license,
+        )
         open_file_btn.pack(side=tk.LEFT)
         close_btn = customtkinter.CTkButton(btn_row, text="Close", command=win.destroy)
         close_btn.pack(side=tk.LEFT, padx=(10, 0))
@@ -470,8 +526,16 @@ class FrameExtractorApp:
         # Center relative to root
         win.update_idletasks()
         try:
-            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win.winfo_width() // 2)
-            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win.winfo_height() // 2)
+            x = (
+                self.root.winfo_x()
+                + (self.root.winfo_width() // 2)
+                - (win.winfo_width() // 2)
+            )
+            y = (
+                self.root.winfo_y()
+                + (self.root.winfo_height() // 2)
+                - (win.winfo_height() // 2)
+            )
             win.geometry(f"+{x}+{y}")
         except tk.TclError:
             pass
@@ -556,7 +620,7 @@ class FrameExtractorApp:
                     else:
                         try:
                             ok = cv2.imwrite(frame_filename, image)  # pylint: disable=no-member
-                        except (cv2.error, OSError) as e_write:  # pylint: disable=catching-non-exception
+                        except (CV2Error, OSError) as e_write:
                             ok = False
                             error_message = f"Status: File write error - {str(e_write)}"
                         if not ok:
@@ -624,7 +688,7 @@ class FrameExtractorApp:
                 f"{str(e_io)}"
             )
             self.root.after(0, lambda text=io_error_text: self._update_status(text))
-        except cv2.error as e:  # pylint: disable=catching-non-exception
+        except CV2Error as e:
             general_error_text = (
                 "Status: Error - "
                 f"{str(e)}"

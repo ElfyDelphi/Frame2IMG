@@ -16,7 +16,7 @@ a = Analysis(
     ['frame_extractor_app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('icon.ico','.'), ('icon.png','.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
