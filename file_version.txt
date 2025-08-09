@@ -17,7 +17,7 @@ VSVersionInfo(
       StringTable(
         '040904B0',
         [
-          StringStruct('CompanyName', 'Your Name'),
+          StringStruct('CompanyName', 'ElfyDelphi'),
           StringStruct('FileDescription', 'Frame2IMG — Video Frame Extractor'),
           StringStruct('FileVersion', '1.0.0'),
           StringStruct('InternalName', 'Frame2IMG'),
