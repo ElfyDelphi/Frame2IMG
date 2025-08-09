@@ -1,0 +1,26 @@
+# Enforce Ruff (lint), isort (imports), and Black (format) on each commit.
+# Using local hooks so versions are controlled by your environment/pyproject.
+# Run once:   py -m pre_commit install
+# Run now:    py -m pre_commit run --all-files
+
+repos:
+  - repo: local
+    hooks:
+      - id: isort
+        name: isort (imports)
+        entry: py -m isort
+        language: system
+        types: [python]
+
+      - id: black
+        name: black (format)
+        entry: py -m black
+        language: system
+        types: [python]
+
+      - id: ruff
+        name: ruff (lint, autofix)
+        entry: py -m ruff
+        language: system
+        types: [python]
+        args: ["check", "--fix"]
