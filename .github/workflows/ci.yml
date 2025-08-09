@@ -1,0 +1,90 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    name: Lint and format checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff black isort
+
+      - name: Ruff (lint)
+        run: ruff check .
+
+      - name: isort (imports)
+        run: isort . --check-only
+
+      - name: Black (format)
+        run: black . --check
+
+  build-windows:
+    name: Build Windows executable
+    needs: lint
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build with PyInstaller
+        shell: pwsh
+        run: |
+          python -m PyInstaller FrameExtractor.spec
+          if (!(Test-Path 'dist/Frame2IMG.exe')) { throw 'Build did not produce dist/Frame2IMG.exe' }
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'
+          $zip = "dist/Frame2IMG_${version}_windows.zip"
+          Compress-Archive -Path 'dist/Frame2IMG.exe','LICENSE','README.md' -DestinationPath $zip -Force
+          Write-Host "Packaged $zip"
+
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frame2IMG-${{ github.ref_name }}-windows
+          path: |
+            dist/Frame2IMG.exe
+            dist/Frame2IMG_${{ github.ref_name }}_windows.zip
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/Frame2IMG.exe
+            dist/Frame2IMG_${{ github.ref_name }}_windows.zip
