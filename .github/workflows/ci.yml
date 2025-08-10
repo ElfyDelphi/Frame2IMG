@@ -59,6 +59,18 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Download FFmpeg (LGPL) for Windows
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path bin -Force | Out-Null
+          $url = 'https://github.com/BtbN/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-lgpl.zip'
+          $zip = 'ffmpeg.zip'
+          Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+          Expand-Archive -Path $zip -DestinationPath 'ffmpeg_unzip' -Force
+          $root = Get-ChildItem -Directory 'ffmpeg_unzip' | Select-Object -First 1
+          Copy-Item "$($root.FullName)\bin\ffmpeg.exe" bin/ffmpeg.exe -Force
+          Copy-Item "$($root.FullName)\bin\ffprobe.exe" bin/ffprobe.exe -Force
+
       - name: Build with PyInstaller
         shell: pwsh
         run: |
@@ -70,7 +82,9 @@ jobs:
         run: |
           $version = '${{ github.ref_name }}'
           $zip = "dist/Frame2IMG_${version}_windows.zip"
-          Compress-Archive -Path 'dist/Frame2IMG.exe','LICENSE','README.md' -DestinationPath $zip -Force
+          $paths = @('dist/Frame2IMG.exe','LICENSE','README.md')
+          if (Test-Path 'licenses/FFmpeg-LGPL.txt') { $paths += 'licenses/FFmpeg-LGPL.txt' }
+          Compress-Archive -Path $paths -DestinationPath $zip -Force
           Write-Host "Packaged $zip"
 
       - name: Upload workflow artifacts

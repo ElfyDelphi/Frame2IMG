@@ -12,11 +12,26 @@ if version_file:
     extra_exe_args['version'] = version_file
 
 
+datas_list = [('icon.ico','.'), ('icon.png','.')]
+if os.path.exists('bin/ffprobe.exe'):
+    datas_list.append(('bin/ffprobe.exe', 'bin'))
+if os.path.exists('bin/ffprobe'):
+    datas_list.append(('bin/ffprobe', 'bin'))
+# Include ffmpeg if present for FFmpeg-based extraction
+if os.path.exists('bin/ffmpeg.exe'):
+    datas_list.append(('bin/ffmpeg.exe', 'bin'))
+if os.path.exists('bin/ffmpeg'):
+    datas_list.append(('bin/ffmpeg', 'bin'))
+if os.path.exists('licenses/FFmpeg-LGPL.txt'):
+    datas_list.append(('licenses/FFmpeg-LGPL.txt', 'licenses'))
+if os.path.exists('LICENSE'):
+    datas_list.append(('LICENSE', '.'))
+
 a = Analysis(
     ['frame_extractor_app.py'],
     pathex=[],
     binaries=[],
-    datas=[('icon.ico','.'), ('icon.png','.')],
+    datas=datas_list,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

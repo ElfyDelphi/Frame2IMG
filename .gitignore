@@ -25,6 +25,7 @@ htmlcov/
 .coverage.*
 .cache
 pytest_cache/
+.ruff_cache/
 
 # Virtual environments
 venv/
@@ -44,3 +45,6 @@ Thumbs.db
 *.manifest
 # Keep the spec file tracked
 # *.spec  # intentionally NOT ignored
+
+# Local binaries (downloaded in CI)
+bin/

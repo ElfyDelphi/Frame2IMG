@@ -1,22 +1,19 @@
 # Frame2IMG — Video Frame Extractor
 
 A simple, modern, dark-themed desktop app to extract frames from a video and save them as images.
-Built with Python, CustomTkinter for UI, and OpenCV for video processing.
+Built with Python, CustomTkinter for UI, and FFmpeg for frame extraction.
 
 ## Features
 
-- Dark-themed GUI using CustomTkinter
-- Select input video and output folder
-- Shows total frame count (when available)
-- Start/Cancel extraction (keeps UI responsive)
-- Progress bar (determinate if total frames are known, indeterminate otherwise)
+- Minimal UI: Select one video and an output folder, then Start
+- FFmpeg-only extraction for speed and display-accurate orientation
+- Automatic orientation correction (honors rotation metadata)
 - PNG-only output (lossless)
+- Fixed naming: `frame_%05d.png` written directly into the chosen folder
+- Overwrites existing files for the simplest flow
+- Indeterminate progress bar and Cancel support
 - Open output folder from the UI after extraction
-- Filename prefix for saved files (default: `frame_`, or input video filename if left blank)
-- Option to skip existing files (merge with previous runs, auto-increments zero-padding digits to 6 for safer naming)
-- Configurable zero-padding digits
-- Top-right “?” About button with View License
-- Embedded license viewer (About → View License) with fallback
+- About dialog with License and Third‑party licenses viewer
 
 ## Requirements
 
@@ -55,47 +52,35 @@ python frame_extractor_app.py
 
 1. Click "Select Video" and choose a video file (mp4, mkv, webm, mov, avi, wmv, flv).
 2. Click "Select Folder" and choose an output directory with write permissions.
-3. Optionally set:
-   - "Prefix": text prepended to filenames (invalid characters are sanitized).
-   - "Skip existing": do not overwrite if a file with the same name exists.
-   - "Digits": number of zero-padding digits for filenames (1–12). Defaults to 5 (or 6 if invalid and Skip existing is enabled).
-4. Click "Start Processing". You can cancel anytime.
-5. When finished (or if partially completed), use "Open Output Folder" to view saved frames.
+3. Click "Start Processing". You can cancel anytime.
+4. When finished, use "Open Output Folder" to view saved frames.
 
 Notes:
 
-- If total frames are unknown, the app uses an indeterminate progress bar.
-- The default naming is `frame_00000.png`. You can change the `Prefix`.
-- When "Skip existing" is enabled, filenames use the original frame index to keep names stable across multiple runs.
-- Hover over "Skip existing" to see a short tooltip explaining the behavior.
-- If Prefix is left blank, it will default to the input video filename (sanitized) plus an underscore.
-- If `cv2.imwrite` fails (e.g., disk full), a clear error is shown and processing stops.
-- Be mindful of disk space when extracting frames, especially for large videos.
+- Autorotation: FFmpeg honors rotation metadata, so extracted frames match the player’s orientation.
+- Naming: Files are saved as `frame_%05d.png` starting at 0 (overwrite is enabled).
+- Progress: The bar is indeterminate since we don’t probe total frames.
+- Disk space: Extracting every frame can use a lot of space on long/high‑res videos.
+- Override: Set the `FFMPEG_PATH` environment variable to point to your own ffmpeg binary if you prefer it over the bundled one.
 
-## Packaging (Optional)
+## Packaging (PyInstaller)
 
-A PyInstaller spec file (`FrameExtractor.spec`) is present. To build an executable (output name will be `Frame2IMG.exe`):
+`FrameExtractor.spec` bundles the app as a single Windows EXE (`dist/Frame2IMG.exe`). If `bin/ffmpeg.exe` and `bin/ffprobe.exe` are present, they are included automatically. The Third‑party license notice (`licenses/FFmpeg-LGPL.txt`) is also included.
 
 ```bash
 pyinstaller FrameExtractor.spec
 ```
 
-Optional polish (already wired in the spec):
+Polish (already wired in the spec):
 
-- App icon (Windows): place `icon.ico` in the project root. The spec auto-detects and embeds it.
-- Version metadata: edit `file_version.txt` (provided) with your details. The spec auto-detects and embeds it.
-- Bump the in-app version by updating `__version__` in `frame_extractor_app.py` (it appears in the window title).
+- App icon (Windows): place `icon.ico` in the project root.
+- Version metadata: edit `file_version.txt`.
+- Bump the in‑app version by updating `__version__` in `frame_extractor_app.py`.
 
-Then rebuild with:
-
-```bash
-pyinstaller FrameExtractor.spec
-```
-
-Tip: If you change only the icon or version file, you can delete the `build/` and `dist/` folders before rebuilding to ensure a clean build.
+Tip: For a clean rebuild, delete `build/` and `dist/` before running PyInstaller.
 
 ## Troubleshooting
 
-- OpenCV errors: Ensure `opencv-python` installed correctly and the video codec is supported.
-- Permission errors: Choose an output folder you can write to (the app also tests writability before starting).
-- Large videos: Extracting every frame may use significant disk space; consider using external tools to compress or downscale images if needed.
+- FFmpeg not found (running from source): ensure `bin/ffmpeg.exe` exists on Windows or `ffmpeg` is on your PATH.
+- Permission errors: Choose an output folder you can write to (the app tests writability before starting).
+- Large videos: Extracting every frame may use significant disk space; consider downscaling if needed.

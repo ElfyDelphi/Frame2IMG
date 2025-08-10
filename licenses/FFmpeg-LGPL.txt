@@ -1,0 +1,24 @@
+FFmpeg and ffprobe Licensing Notice
+
+This application bundles FFmpeg and ffprobe from the FFmpeg project. FFmpeg performs frame extraction, honoring display rotation metadata by default; ffprobe may be used for metadata inspection when needed.
+
+FFmpeg is licensed under the GNU Lesser General Public License (LGPL) version 2.1 or later (for most libraries) and/or the GNU General Public License (GPL) depending on the configuration and components used. The bundled binaries are from an LGPL build and are redistributed in accordance with the FFmpeg licensing terms.
+
+Project: https://ffmpeg.org/
+Legal:   https://ffmpeg.org/legal.html
+Source:  https://github.com/FFmpeg/FFmpeg
+Releases: https://ffmpeg.org/releases/
+
+You may replace `bin/ffmpeg.exe` and/or `bin/ffprobe.exe` with your own compatible builds. For information on your rights under the LGPL, please review the license text below and the FFmpeg legal page.
+
+----- BEGIN LGPL v2.1 SUMMARY (non-substitute) -----
+This is a high-level, non-exhaustive summary:
+- You may copy and redistribute the unmodified FFmpeg/ffprobe binaries.
+- You may replace them with other builds, including your own, that comply with the LGPL.
+- If you modify and distribute the FFmpeg program(s) or their LGPL-covered libraries, you must comply with the LGPL’s requirements, including making the modified library source available and permitting reverse-engineering for debugging of user modifications.
+- Full terms are provided by the official license text (see link below).
+----- END SUMMARY -----
+
+Full License Text (LGPL v2.1): https://www.gnu.org/licenses/old-licenses/lgpl-2.1.html
+
+If you need an offline copy of the full LGPL v2.1 text in this distribution, please contact the maintainer to include it, or replace this file with the official license text as permitted by the terms above.

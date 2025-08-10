@@ -1,14 +1,15 @@
-"""Video Frame Extractor GUI application using customtkinter and OpenCV."""
+"""Video Frame Extractor GUI application using customtkinter and FFmpeg."""
 
 import os
+import shutil
 import subprocess
 import sys
 import threading
+import time
 import tkinter as tk  # For filedialog
 from tkinter import filedialog, messagebox
 
 import customtkinter
-import cv2  # pylint: disable=import-error
 
 __version__ = "1.0.0"
 
@@ -92,8 +93,6 @@ class FrameExtractorApp:
         self.video_path_label = customtkinter.CTkLabel(input_frame, text="No video selected")
         self.video_path_label.pack(side=tk.LEFT, padx=5, pady=5, expand=True, fill="x")
 
-        # self.total_frames_label will be in control_frame now
-
         self.select_video_button = customtkinter.CTkButton(
             input_frame, text="Select Video", command=self.select_video_file
         )
@@ -114,9 +113,6 @@ class FrameExtractorApp:
         # Frame for controls
         control_frame = customtkinter.CTkFrame(self.root, fg_color="transparent")  # Transparent bg
         control_frame.pack(padx=10, pady=10, fill="x")
-
-        self.total_frames_label = customtkinter.CTkLabel(control_frame, text="Total Frames: N/A")
-        self.total_frames_label.pack(side=tk.LEFT, padx=(0, 20), pady=5)  # Right padding
 
         self.start_button = customtkinter.CTkButton(
             control_frame, text="Start Processing", command=self.start_processing, state=tk.DISABLED
@@ -141,61 +137,7 @@ class FrameExtractorApp:
         )
         self.open_output_button.pack(side=tk.LEFT, padx=5, pady=5)
 
-        # Options row for format and naming
-        options_row = customtkinter.CTkFrame(control_frame, fg_color="transparent")
-        options_row.pack(padx=0, pady=(5, 0), fill="x")
-
-        # Format is fixed to PNG (lossless)
-        options_format_label = customtkinter.CTkLabel(options_row, text="Format: PNG")
-        options_format_label.pack(side=tk.LEFT, padx=(0, 20))
-
-        # Filename prefix
-        options_prefix_label = customtkinter.CTkLabel(options_row, text="Prefix:")
-        options_prefix_label.pack(side=tk.LEFT, padx=(20, 5))
-        self.prefix_var = tk.StringVar(value="frame_")
-        self.prefix_entry = customtkinter.CTkEntry(
-            options_row, width=120, textvariable=self.prefix_var
-        )
-        self.prefix_entry.pack(side=tk.LEFT, padx=(0, 20))
-
-        # Skip existing files
-        self.skip_existing_var = tk.BooleanVar(value=False)
-        self.skip_existing_checkbox = customtkinter.CTkCheckBox(
-            options_row,
-            text="Skip existing",
-            variable=self.skip_existing_var,
-            command=self._on_toggle_skip_existing,
-        )
-        self.skip_existing_checkbox.pack(side=tk.LEFT)
-        # Tooltip for skip existing
-        self._bind_tooltip(
-            self.skip_existing_checkbox,
-            "When enabled, filenames use the source frame index and "
-            "existing files are skipped (no overwrite).",
-        )
-
-        # Zero-padding digits
-        options_digits_label = customtkinter.CTkLabel(options_row, text="Digits:")
-        options_digits_label.pack(side=tk.LEFT, padx=(20, 5))
-        self.digits_var = tk.StringVar(value="5")
-        self.digits_entry = customtkinter.CTkEntry(
-            options_row, width=60, textvariable=self.digits_var
-        )
-        self.digits_entry.pack(side=tk.LEFT)
-        # Tooltip for digits
-        self._bind_tooltip(
-            self.digits_entry,
-            "Zero-padding digits (1–12). Default is 5; "
-            "becomes 6 when 'Skip existing' is enabled.",
-        )
-        # Track if user manually edited digits (prevents auto-bump overrides)
-        self._digits_user_changed = False
-        # Live input validation: allow only digits while typing (empty allowed)
-        self._digits_trace_updating = False
-        self.digits_var.trace_add("write", self._on_digits_var_changed)
-        # Mark user-changed on keypress; clamp to range on focus-out
-        self.digits_entry.bind("<KeyRelease>", lambda _e: self._mark_digits_user_changed())
-        self.digits_entry.bind("<FocusOut>", self._on_digits_focus_out)
+        # Minimal UI by design; format fixed to PNG and naming is fixed.
 
         # Progress bar (determinate when total frames known, indeterminate otherwise)
         self.progress_bar = customtkinter.CTkProgressBar(control_frame, mode="determinate")
@@ -213,8 +155,6 @@ class FrameExtractorApp:
         self.cancel_event = None  # Set when processing to allow cancellation
         # Initialize attributes that are later set in start_processing()
         # This quiets lint about attributes defined outside __init__.
-        self.frame_interval = 1
-        self.output_format_current = "PNG"
         self.filename_prefix_current = "frame_"
         self.skip_existing_current = False
         self.name_pad = 5
@@ -231,45 +171,12 @@ class FrameExtractorApp:
         if file_path:
             self.video_file_path = file_path
             self.video_path_label.configure(text=self.video_file_path)
-            # Try to get total frames
-            try:
-                # pylint: disable=no-member
-                cap = cv2.VideoCapture(self.video_file_path)
-                if cap.isOpened():
-                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                    # Some codecs may report 0; treat non-positive as unknown
-                    self.total_frames = total_frames if total_frames > 0 else None
-                    video_name = os.path.basename(self.video_file_path)
-                    if self.total_frames is not None:
-                        self.total_frames_label.configure(text=f"Total Frames: {self.total_frames}")
-                        status_text = f"Video: {video_name} ({self.total_frames} frames)"
-                    else:
-                        self.total_frames_label.configure(text="Total Frames: Unknown")
-                        status_text = f"Video: {video_name} (unknown frames)"
-                    self.status_label.configure(text=status_text)
-                    cap.release()
-                else:
-                    self.total_frames_label.configure(text="Total Frames: Error")
-                    self.status_label.configure(text="Status: Error opening video for frame count.")
-                    self.total_frames = None
-                    cap.release()
-            except (OSError, ValueError) as e_fs:
-                self.total_frames_label.configure(text="Total Frames: Error")
-                error_message = f"Status: File error - {str(e_fs)}"
-                self.status_label.configure(text=error_message)
-                self.total_frames = None
-            except cv2.error as e_gen:  # type: ignore[attr-defined]
-                self.total_frames_label.configure(text="Total Frames: Error")
-                error_message = f"Status: Error reading video details - {str(e_gen)}"
-                self.status_label.configure(text=error_message)
-                self.total_frames = None
-
+            video_name = os.path.basename(self.video_file_path)
+            self.status_label.configure(text=f"Video: {video_name}")
         else:
             self.video_file_path = ""  # Clear path if selection cancelled
             self.video_path_label.configure(text="No video selected")
-            self.total_frames_label.configure(text="Total Frames: N/A")
             self.status_label.configure(text="Status: Video selection cancelled")
-            self.total_frames = None
         # Reset progress UI on new selection
         self.progress_bar.stop()
         self.progress_bar.configure(mode="determinate")
@@ -310,68 +217,6 @@ class FrameExtractorApp:
     def _enable_start_button(self):
         """Helper function to enable start button from any thread."""
         self.update_start_button_state()
-
-    def _mark_digits_user_changed(self):
-        """Mark that the user manually edited the digits field."""
-        self._digits_user_changed = True
-
-    def _on_digits_var_changed(self, *_):
-        """Keep digits-only in the input while allowing empty during typing."""
-        if getattr(self, "_digits_trace_updating", False):
-            return
-        val = self.digits_var.get()
-        # Allow empty string while typing
-        if val == "":
-            return
-        filtered = "".join(ch for ch in val if ch.isdigit())
-        if filtered != val:
-            self._digits_trace_updating = True
-            try:
-                self.digits_var.set(filtered)
-            finally:
-                self._digits_trace_updating = False
-
-    def _on_digits_focus_out(self, _event=None):
-        """On blur: clamp to 1–12; if empty/invalid, set to default (6 if skip-existing else 5)."""
-        self._mark_digits_user_changed()
-        s = (self.digits_var.get() or "").strip()
-        # Default on empty
-        if s == "":
-            default_val = (
-                "6"
-                if (hasattr(self, "skip_existing_var") and bool(self.skip_existing_var.get()))
-                else "5"
-            )
-            self.digits_var.set(default_val)
-            return
-        try:
-            v = int(s)
-        except (ValueError, TypeError):
-            default_val = (
-                "6"
-                if (hasattr(self, "skip_existing_var") and bool(self.skip_existing_var.get()))
-                else "5"
-            )
-            self.digits_var.set(default_val)
-            return
-        # Clamp to 1–12
-        if v < 1:
-            v = 1
-        elif v > 12:
-            v = 12
-        self.digits_var.set(str(v))
-
-    def _on_toggle_skip_existing(self):
-        """Auto-bump digits to 6 when enabling skip existing, unless user changed it."""
-        if bool(self.skip_existing_var.get()):
-            # Only adjust if user hasn't explicitly changed digits
-            if not getattr(self, "_digits_user_changed", False):
-                try:
-                    cur = int(self.digits_var.get())
-                except (ValueError, TypeError):
-                    cur = 0
-                if cur < 6:
-                    self.digits_var.set("6")
 
     def _bind_tooltip(self, widget, text: str):
         """Bind a simple hover tooltip to a widget."""
@@ -421,8 +266,9 @@ class FrameExtractorApp:
 
         info = (
             f"Frame2IMG v{__version__}\n\n"
-            "Video Frame Extractor (PNG-only)\n"
-            "Dark theme UI with CustomTkinter\n\n"
+            "Minimal FFmpeg-only frame extractor (PNG)\n"
+            "Automatic orientation correction (when metadata is present)\n\n"
+            "Bundled FFmpeg and FFprobe — see Third-party Licenses\n\n"
             "License: MIT"
         )
         content = customtkinter.CTkFrame(win, fg_color="transparent")
@@ -436,6 +282,10 @@ class FrameExtractorApp:
             btn_row, text="View License", command=self._show_license_dialog
         )
         lic_btn.pack(side=tk.LEFT)
+        tp_btn = customtkinter.CTkButton(
+            btn_row, text="Third-party Licenses", command=self._show_third_party_dialog
+        )
+        tp_btn.pack(side=tk.LEFT, padx=(10, 0))
         close_btn = customtkinter.CTkButton(btn_row, text="Close", command=win.destroy)
         close_btn.pack(side=tk.LEFT, padx=(10, 0))
 
@@ -535,6 +385,69 @@ class FrameExtractorApp:
         except tk.TclError:
             pass
 
+    def _candidate_third_party_paths(self):
+        """Return candidate paths for Third-party licenses (e.g., FFmpeg notice)."""
+        paths = []
+        if getattr(sys, "frozen", False):  # type: ignore[attr-defined]
+            exe_dir = os.path.dirname(sys.executable)
+            paths.append(os.path.join(exe_dir, "licenses", "FFmpeg-LGPL.txt"))
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                paths.append(os.path.join(meipass, "licenses", "FFmpeg-LGPL.txt"))
+        src_dir = os.path.dirname(os.path.abspath(__file__))
+        paths.append(os.path.join(src_dir, "licenses", "FFmpeg-LGPL.txt"))
+        return paths
+
+    def _get_third_party_text(self) -> str:
+        """Read Third-party notice text; fallback to a brief FFmpeg note."""
+        for p in self._candidate_third_party_paths():
+            try:
+                with open(p, encoding="utf-8") as f:
+                    return f.read()
+            except OSError:
+                continue
+        return (
+            "Third-party components used by Frame2IMG\n\n"
+            "FFmpeg and ffprobe from the FFmpeg project are bundled.\n"
+            "Frame extraction uses FFmpeg; metadata reading may use ffprobe.\n"
+            "License: LGPL v2.1 or later\n"
+            "More info: https://ffmpeg.org/legal.html\n"
+        )
+
+    def _show_third_party_dialog(self):
+        """Show a dialog listing third-party components and their licenses."""
+        win = customtkinter.CTkToplevel(self.root)
+        win.title("Third-party Licenses — Frame2IMG")
+        try:
+            win.geometry("760x520")
+        except tk.TclError:
+            pass
+        try:
+            win.grab_set()
+        except tk.TclError:
+            pass
+
+        container = customtkinter.CTkFrame(win, fg_color="transparent")
+        container.pack(padx=14, pady=14, fill="both", expand=True)
+
+        text_box = customtkinter.CTkTextbox(container, wrap="word")
+        text_box.pack(fill="both", expand=True)
+        text_box.insert("1.0", self._get_third_party_text())
+        text_box.configure(state="disabled")
+
+        btn_row = customtkinter.CTkFrame(container, fg_color="transparent")
+        btn_row.pack(fill="x", pady=(8, 0))
+        close_btn = customtkinter.CTkButton(btn_row, text="Close", command=win.destroy)
+        close_btn.pack(side=tk.LEFT)
+
+        win.update_idletasks()
+        try:
+            x = self.root.winfo_x() + (self.root.winfo_width() // 2) - (win.winfo_width() // 2)
+            y = self.root.winfo_y() + (self.root.winfo_height() // 2) - (win.winfo_height() // 2)
+            win.geometry(f"+{x}+{y}")
+        except tk.TclError:
+            pass
+
     def _open_license(self):
         """Open the LICENSE file with the default system viewer."""
         # Try candidates in order
@@ -554,143 +467,130 @@ class FrameExtractorApp:
             "License", "LICENSE file not found. Use the embedded viewer in About."
         )
 
-    def _sanitize_prefix(self, prefix: str) -> str:
-        """Sanitize filename prefix by removing invalid path characters.
-        Returns a safe default if the result is empty.
+    def _ffmpeg_path(self) -> str:
+        """Return a usable ffmpeg executable path.
+        Priority: env FFMPEG_PATH -> bundled locations -> PATH -> 'ffmpeg'
         """
-        if not isinstance(prefix, str):
-            return "frame_"
-        s = prefix.strip()
-        # Replace characters invalid on Windows and common platforms
-        invalid = '<>:"/\\|?*\n\r\t'
-        trans = str.maketrans({ch: "_" for ch in invalid})
-        s = s.translate(trans)
-        return s if s else "frame_"
+        # 1) Explicit env var
+        env_p = os.environ.get("FFMPEG_PATH")
+        if env_p and os.path.isfile(env_p):
+            return env_p
+        # 2) Bundled candidates (PyInstaller or source tree)
+        candidates = []
+        exe_name = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+        try:
+            if getattr(sys, "frozen", False):  # type: ignore[attr-defined]
+                meipass = getattr(sys, "_MEIPASS", None)
+                exe_dir = os.path.dirname(sys.executable)
+                base_paths = []
+                if meipass:
+                    base_paths.extend([meipass, os.path.join(meipass, "bin")])
+                base_paths.extend([exe_dir, os.path.join(exe_dir, "bin")])
+            else:
+                here = os.path.dirname(os.path.abspath(__file__))
+                base_paths = [here, os.path.join(here, "bin")]
+            for d in base_paths:
+                if d:
+                    candidates.append(os.path.join(d, exe_name))
+        except Exception:
+            pass
+        for c in candidates:
+            if c and os.path.isfile(c):
+                return c
+        # 3) PATH
+        which = shutil.which("ffmpeg")
+        if which:
+            return which
+        # 4) Fallback
+        return "ffmpeg"
+
+    def _run_ffmpeg_extraction(self) -> tuple[bool, str]:
+        """Extract frames using ffmpeg. Returns (ok, error_message)."""
+        ffmpeg = self._ffmpeg_path()
+        # Build output pattern
+        pad = int(getattr(self, "name_pad", 5))
+        prefix = getattr(self, "filename_prefix_current", "frame_")
+        pattern = f"{prefix}%0{pad}d.png"
+        out_path = os.path.join(self.output_folder_path, pattern)
+
+        # Overwrite behavior
+        overwrite_flag = "-y"  # Always overwrite for simplest flow
+
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            overwrite_flag,
+            "-i",
+            self.video_file_path,
+            "-start_number",
+            "0",
+            out_path,
+        ]
+
+        # Launch FFmpeg and allow cancellation
+        try:
+            self.root.after(0, lambda: self._update_status("Status: Processing with FFmpeg..."))
+            proc = subprocess.Popen(cmd)
+            # Poll loop to support cancel
+            while True:
+                ret = proc.poll()
+                if ret is not None:
+                    break
+                if self.cancel_event is not None and self.cancel_event.is_set():
+                    # Terminate FFmpeg cleanly; force kill if needed
+                    try:
+                        proc.terminate()
+                    except Exception:
+                        pass
+                    try:
+                        proc.wait(timeout=3)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+                    self.root.after(0, lambda: self._update_status("Status: Cancelled."))
+                    return True, ""
+                time.sleep(0.1)
+
+            if ret == 0:
+                # Count saved frames for a nicer status
+                saved = 0
+                try:
+                    files = [
+                        f
+                        for f in os.listdir(self.output_folder_path)
+                        if f.startswith(prefix) and f.lower().endswith(".png")
+                    ]
+                    saved = len(files)
+                except Exception:
+                    pass
+                if saved > 0:
+                    msg = f"Status: Done! Saved {saved} frames to {self.output_folder_path}"
+                else:
+                    msg = "Status: Done (FFmpeg)"
+                self.root.after(0, lambda text=msg: self._update_status(text))
+                try:
+                    self.root.after(0, lambda: self.open_output_button.configure(state=tk.NORMAL))
+                except Exception:
+                    pass
+                return True, ""
+            return False, f"FFmpeg failed with code {ret}"
+        except OSError as e:
+            return False, f"FFmpeg not found or error: {e}"
 
     def _threaded_start_processing(self):
-        """Actual frame extraction logic to be run in a separate thread."""
-        video_capture = None
+        """Actual frame extraction logic to be run in a separate thread (FFmpeg only)."""
         try:
-            # pylint: disable=no-member
-            video_capture = cv2.VideoCapture(self.video_file_path)
-            if not video_capture.isOpened():
-                self.root.after(
-                    0,
-                    lambda: self._update_status("Status: Error - Could not open video file."),
-                )
-                self.root.after(0, self._enable_start_button)
-                self.root.after(
-                    0,
-                    lambda: self.cancel_button.configure(state=tk.DISABLED),
-                )
-                self.root.after(0, self.progress_bar.stop)
-                return
-
-            # Track processed frames (for progress) and saved frames (for filenames)
-            error_message = None
-            frame_index = 0  # 0-based index of processed frames
-            saved_count = 0  # number of frames saved
-            success, image = video_capture.read()
-
-            while success:
-                # Check for cancellation request
-                if self.cancel_event is not None and self.cancel_event.is_set():
-                    break
-                # Save according to interval
-                if frame_index % max(getattr(self, "frame_interval", 1), 1) == 0:
-                    # Always write PNG
-                    filename_ext = "png"
-                    pad = int(getattr(self, "name_pad", 5))
-                    prefix = getattr(self, "filename_prefix_current", "frame_")
-                    index_for_name = (
-                        frame_index
-                        if bool(getattr(self, "skip_existing_current", False))
-                        else saved_count
-                    )
-                    name_formatted = f"{prefix}{index_for_name:0{pad}d}.{filename_ext}"
-                    frame_filename = os.path.join(self.output_folder_path, name_formatted)
-                    if bool(getattr(self, "skip_existing_current", False)) and os.path.exists(
-                        frame_filename
-                    ):
-                        pass
-                    else:
-                        try:
-                            ok = cv2.imwrite(frame_filename, image)  # pylint: disable=no-member
-                        except (cv2.error, OSError) as e_write:  # type: ignore[attr-defined]
-                            ok = False
-                            error_message = f"Status: File write error - {str(e_write)}"
-                        if not ok:
-                            if error_message is None:
-                                base_name = os.path.basename(frame_filename)
-                                error_message = f"Status: Error writing file: {base_name}"
-                            break
-                        saved_count += 1
-                # Update status every 30 saved frames
-                if saved_count > 0 and saved_count % 30 == 0:
-                    status_update_text = f"Status: Processing... Saved {saved_count} frames"
-                    self.root.after(0, lambda text=status_update_text: self._update_status(text))
-                # Update progress periodically based on processed frames
-                if self.total_frames and frame_index % 20 == 0:
-                    progress_value = min((frame_index + 1) / float(self.total_frames), 1.0)
-                    self.root.after(0, lambda v=progress_value: self.progress_bar.set(v))
-                # Periodic processed-frame status updates
-                if self.total_frames and frame_index > 0 and frame_index % 200 == 0:
-                    pct = min(((frame_index + 1) / float(self.total_frames)) * 100.0, 100.0)
-                    processed_text = (
-                        f"Status: Processing... Processed {frame_index + 1}/{self.total_frames} "
-                        f"(~{pct:.1f}%) — Saved {saved_count}"
-                    )
-                    self.root.after(0, lambda text=processed_text: self._update_status(text))
-                elif not self.total_frames and frame_index > 0 and frame_index % 500 == 0:
-                    processed_text = (
-                        f"Status: Processing... Processed {frame_index + 1} — Saved {saved_count}"
-                    )
-                    self.root.after(0, lambda text=processed_text: self._update_status(text))
-                success, image = video_capture.read()
-                frame_index += 1
-
-            video_capture.release()
-            video_capture = None
-            if error_message:
-                self.root.after(0, lambda text=error_message: self._update_status(text))
-                if saved_count > 0:
-                    self.root.after(
-                        0,
-                        lambda: self.open_output_button.configure(state=tk.NORMAL),
-                    )
-            elif self.cancel_event is not None and self.cancel_event.is_set():
-                cancel_text = (
-                    f"Status: Cancelled. Saved {saved_count} frames to {self.output_folder_path}"
-                )
-                self.root.after(0, lambda text=cancel_text: self._update_status(text))
-                if saved_count > 0:
-                    self.root.after(
-                        0,
-                        lambda: self.open_output_button.configure(state=tk.NORMAL),
-                    )
-            else:
-                final_status_text = (
-                    f"Status: Done! Saved {saved_count} frames to {self.output_folder_path}"
-                )
-                self.root.after(0, lambda text=final_status_text: self._update_status(text))
-                if self.total_frames:
-                    # Ensure progress bar shows completion
-                    self.root.after(0, lambda: self.progress_bar.set(1.0))
-                if saved_count > 0:
-                    self.root.after(
-                        0,
-                        lambda: self.open_output_button.configure(state=tk.NORMAL),
-                    )
-        except OSError as e_io:
-            io_error_text = f"Status: File Error - {e_io}"
-            self.root.after(0, lambda text=io_error_text: self._update_status(text))
-        except cv2.error as e:  # type: ignore[attr-defined]
-            general_error_text = f"Status: Error - {e}"
-            self.root.after(0, lambda text=general_error_text: self._update_status(text))
+            ok, err = self._run_ffmpeg_extraction()
+            if not ok:
+                self.root.after(0, lambda text=f"Status: Error - {err}": self._update_status(text))
+        except Exception as e:
+            err_text = f"Status: Error - {e}"
+            self.root.after(0, lambda text=err_text: self._update_status(text))
         finally:
-            # Ensure capture is released even on early exit or exception
-            if "video_capture" in locals() and video_capture is not None:
-                video_capture.release()
             # Stop indeterminate animation if running
             self.root.after(0, self.progress_bar.stop)
             # Re-enable/disable relevant controls
@@ -698,13 +598,7 @@ class FrameExtractorApp:
             self.root.after(0, lambda: self.cancel_button.configure(state=tk.DISABLED))
             self.root.after(0, lambda: self.select_video_button.configure(state=tk.NORMAL))
             self.root.after(0, lambda: self.select_output_button.configure(state=tk.NORMAL))
-            # Format is fixed; no control to re-enable
-            if hasattr(self, "prefix_entry"):
-                self.root.after(0, lambda: self.prefix_entry.configure(state=tk.NORMAL))
-            if hasattr(self, "skip_existing_checkbox"):
-                self.root.after(0, lambda: self.skip_existing_checkbox.configure(state=tk.NORMAL))
-            if hasattr(self, "digits_entry"):
-                self.root.after(0, lambda: self.digits_entry.configure(state=tk.NORMAL))
+            # No extra controls to re-enable in minimal UI
             # cleanup event
             self.cancel_event = None
             # If user requested close during processing, close now
@@ -750,12 +644,6 @@ class FrameExtractorApp:
         self.select_video_button.configure(state=tk.DISABLED)
         self.select_output_button.configure(state=tk.DISABLED)
         self.open_output_button.configure(state=tk.DISABLED)
-        if hasattr(self, "prefix_entry"):
-            self.prefix_entry.configure(state=tk.DISABLED)
-        if hasattr(self, "skip_existing_checkbox"):
-            self.skip_existing_checkbox.configure(state=tk.DISABLED)
-        if hasattr(self, "digits_entry"):
-            self.digits_entry.configure(state=tk.DISABLED)
 
         # Prepare cancellation event
         self.cancel_event = threading.Event()
@@ -763,39 +651,15 @@ class FrameExtractorApp:
         # Always extract every frame
         self.frame_interval = 1
 
-        # Output format is fixed to PNG (lossless)
-        self.output_format_current = "PNG"
+        # Minimal naming settings
+        self.output_format_current = "PNG"  # informational only
+        self.filename_prefix_current = "frame_"
+        self.name_pad = 5
+        self.skip_existing_current = False
 
-        # Filename prefix and skip-existing behavior
-        raw_prefix = self.prefix_var.get() if hasattr(self, "prefix_var") else "frame_"
-        sanitized_prefix = self._sanitize_prefix(raw_prefix)
-        if not sanitized_prefix or (isinstance(raw_prefix, str) and raw_prefix.strip() == ""):
-            # Default to video basename + '_' when available
-            base = os.path.splitext(os.path.basename(getattr(self, "video_file_path", "") or ""))[0]
-            if base:
-                derived = f"{base}_"
-                sanitized_prefix = self._sanitize_prefix(derived)
-        self.filename_prefix_current = sanitized_prefix if sanitized_prefix else "frame_"
-        self.skip_existing_current = (
-            bool(self.skip_existing_var.get()) if hasattr(self, "skip_existing_var") else False
-        )
-        # Determine zero-padding digits
-        digits_val = None
-        try:
-            digits_val = int(self.digits_var.get()) if hasattr(self, "digits_var") else None
-        except (ValueError, TypeError):
-            digits_val = None
-        if digits_val is None or digits_val < 1 or digits_val > 12:
-            digits_val = 6 if self.skip_existing_current else 5
-        self.name_pad = digits_val
-
-        # Configure progress bar based on availability of total frames
-        if self.total_frames:
-            self.progress_bar.configure(mode="determinate")
-            self.progress_bar.set(0)
-        else:
-            self.progress_bar.configure(mode="indeterminate")
-            self.progress_bar.start()
+        # FFmpeg progress is not tracked numerically; use indeterminate animation
+        self.progress_bar.configure(mode="indeterminate")
+        self.progress_bar.start()
 
         # Create and start the processing thread
         thread = threading.Thread(target=self._threaded_start_processing, daemon=True)
