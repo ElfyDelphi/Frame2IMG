@@ -6,6 +6,8 @@ A minimal, modern dark-themed GUI to extract every frame from a video into highe
 - Highest quality, lossless PNG output (no resizing or quality loss)
 - Simple UI: choose input video and output folder, then Start
 - Progress bar, live status, and Cancel
+- Exact frame counting via ffprobe when available; falls back to an estimate otherwise
+- Auto GPU detection and acceleration via NVDEC (when supported); CPU fallback otherwise
 - Output saved inside `<video_name>_frames/` subfolder
 - Cross-platform Qt (PySide6) GUI
 
@@ -44,6 +46,30 @@ You should see `cuda` or `nvdec` listed. If not, your FFmpeg build may lack CUDA
 - PNGs are lossless; compression level does not affect visual quality. This app uses PNG to preserve maximum quality.
 - If a video fails to open, your system codecs may be missing. Installing FFmpeg or using a different video file can help.
 - Very long/high‑resolution videos will generate many large files; ensure you have sufficient disk space.
+
+## Supported formats
+- Containers: MP4, MOV, AVI, MKV, WEBM, M4V, MPG/MPEG, WMV
+- Codecs: H.264/AVC, H.265/HEVC, VP9, and others supported by your FFmpeg/OpenCV build
+- Output: PNG (lossless). JPEG support is planned.
+
+## Non‑Goals (initial public release)
+- Full video editing/transcoding or audio extraction
+- Scene detection and per‑scene export (future exploration)
+- Batch/multi‑file queueing (planned)
+- macOS packaging (help wanted)
+
+## Roadmap
+- Optional JPEG output and quality control
+- Batch mode / multiple input files
+- Simple scene‑based frame sampling
+- macOS packaging and notarization
+
+## Contributing
+See `CONTRIBUTING.md` for setup and guidelines.
+
+## License and third‑party
+- Project license: MIT (see `LICENSE`)
+- FFmpeg/ffprobe are licensed separately (LGPL/GPL depending on build). When distributing binaries, include FFmpeg’s license files and notices. See `third_party/ffmpeg/README.md`.
 
 ## Windows 11 build (PyInstaller)
 
