@@ -11,6 +11,7 @@ import time
 import cv2
 from PySide6 import QtCore, QtGui, QtWidgets
 
+__version__ = "0.1.1"
 
 # -------------------------
 # Probe helpers (ffprobe)
@@ -323,7 +324,7 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
     dark_palette.setColor(QtGui.QPalette.WindowText, QtCore.Qt.white)
     dark_palette.setColor(QtGui.QPalette.Base, dark_color)
     dark_palette.setColor(QtGui.QPalette.AlternateBase, QtGui.QColor(60, 63, 65))
-    dark_palette.setColor(QtGui.QPalette.ToolTipBase, QtCore.Qt.white)
+    dark_palette.setColor(QtGui.QPalette.ToolTipBase, QtGui.QColor(60, 63, 65))
     dark_palette.setColor(QtGui.QPalette.ToolTipText, QtCore.Qt.white)
     dark_palette.setColor(QtGui.QPalette.Text, QtCore.Qt.white)
     dark_palette.setColor(QtGui.QPalette.Disabled, QtGui.QPalette.Text, disabled_color)
@@ -340,6 +341,7 @@ def apply_dark_theme(app: QtWidgets.QApplication) -> None:
     app.setStyleSheet(
         """
         QWidget { font-size: 14px; }
+        QToolTip { color: #ffffff; background-color: #353535; border: 1px solid #4a4a4a; }
         QLineEdit, QTextEdit, QPlainTextEdit { 
             background: #2d2d2d; color: #ffffff; border: 1px solid #3f3f3f; border-radius: 6px; padding: 6px; }
         QPushButton { 
@@ -720,7 +722,7 @@ class FrameExtractorWorker(QtCore.QObject):
 class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Frame2Image")
+        self.setWindowTitle(f"Frame2Image v{__version__}")
         self.setMinimumSize(720, 420)
 
         self._thread: Optional[QtCore.QThread] = None
@@ -729,12 +731,14 @@ class MainWindow(QtWidgets.QMainWindow):
         self._started_at: Optional[float] = None
         self._total_for_run: Optional[int] = None
         self._has_cuda: Optional[bool] = None
+        self._settings: QtCore.QSettings = QtCore.QSettings("ElfyDelphi", "Frame2Image")
 
         # Enable drag and drop for quick video selection
         self.setAcceptDrops(True)
 
         self._build_ui()
         self._wire_events()
+        self._load_settings()
 
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget(self)
@@ -766,6 +770,11 @@ class MainWindow(QtWidgets.QMainWindow):
         self.video_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DialogOpenButton))
         self.video_btn.setIconSize(QtCore.QSize(24, 24))
         self.video_btn.setToolTip("Browse video file")
+        self.open_in_btn = QtWidgets.QToolButton()
+        self.open_in_btn.setIcon(self.style().standardIcon(QtWidgets.QStyle.SP_DirOpenIcon))
+        self.open_in_btn.setIconSize(QtCore.QSize(22, 22))
+        self.open_in_btn.setToolTip("Open input folder")
+        self.open_in_btn.setEnabled(False)
 
         self.out_edit = QtWidgets.QLineEdit()
         self.out_edit.setPlaceholderText("Choose output folder…")
@@ -775,9 +784,10 @@ class MainWindow(QtWidgets.QMainWindow):
         self.out_btn.setIconSize(QtCore.QSize(24, 24))
         self.out_btn.setToolTip("Choose output folder")
 
-        # 2-column layout: field + icon button
+        # 3-column layout: field + browse + open-in
         in_layout.addWidget(self.video_edit, 0, 0)
         in_layout.addWidget(self.video_btn, 0, 1)
+        in_layout.addWidget(self.open_in_btn, 0, 2)
         in_layout.addWidget(self.out_edit, 1, 0)
         in_layout.addWidget(self.out_btn, 1, 1)
         in_layout.setColumnStretch(0, 1)
@@ -786,7 +796,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.meta_label = QtWidgets.QLabel("")
         self.meta_label.setStyleSheet("color: #bbbbbb;")
         self.meta_label.setVisible(False)
-        in_layout.addWidget(self.meta_label, 2, 0, 1, 2)
+        in_layout.addWidget(self.meta_label, 2, 0, 1, 3)
 
         # Time range controls
         times_row = QtWidgets.QWidget()
@@ -807,12 +817,12 @@ class MainWindow(QtWidgets.QMainWindow):
         self.end_time_edit.setFixedWidth(160)
         times_layout.addWidget(self.end_time_edit)
         times_layout.addStretch(1)
-        in_layout.addWidget(times_row, 3, 0, 1, 2)
+        in_layout.addWidget(times_row, 3, 0, 1, 3)
 
         # Precision frame counting toggle
         self.precision_check = QtWidgets.QCheckBox("Precision frame count (slower)")
         self.precision_check.setToolTip("Use ffprobe -count_frames for exact frame count; may be slow on long videos.")
-        in_layout.addWidget(self.precision_check, 4, 0, 1, 2)
+        in_layout.addWidget(self.precision_check, 4, 0, 1, 3)
 
         layout.addWidget(in_group)
 
@@ -829,6 +839,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_out_btn.setIconSize(QtCore.QSize(22, 22))
         self.open_out_btn.setToolTip("Open output folder")
         self.open_out_btn.setEnabled(False)
+        self.auto_open_check = QtWidgets.QCheckBox("Open folder when done")
+        self.auto_open_check.setToolTip("Automatically open the output folder after a successful extraction")
+        self.auto_open_check.setChecked(False)
 
         # GPU status badge
         self.gpu_badge = QtWidgets.QLabel("GPU: Detecting…")
@@ -839,6 +852,7 @@ class MainWindow(QtWidgets.QMainWindow):
         ctl_layout.addWidget(self.cancel_btn)
         ctl_layout.addStretch(1)
         ctl_layout.addWidget(self.gpu_badge)
+        ctl_layout.addWidget(self.auto_open_check)
         ctl_layout.addWidget(self.open_out_btn)
 
         layout.addWidget(ctl_group)
@@ -885,6 +899,56 @@ class MainWindow(QtWidgets.QMainWindow):
         self.start_btn.clicked.connect(self.on_start)
         self.cancel_btn.clicked.connect(self.on_cancel)
         self.open_out_btn.clicked.connect(self.on_open_out)
+        self.open_in_btn.clicked.connect(self.on_open_in)
+        self.video_edit.textChanged.connect(self._on_video_text_changed)
+
+    # -------- Settings helpers --------
+    def _load_settings(self) -> None:
+        try:
+            last_out = self._settings.value("last_output_dir", "", type=str) or ""
+            if last_out:
+                self.out_edit.setText(last_out)
+            last_vid = self._settings.value("last_video_path", "", type=str) or ""
+            if last_vid and Path(last_vid).exists():
+                # Set without overriding out_edit if already set
+                self.video_edit.setText(last_vid)
+                self.update_metadata_for_path(last_vid)
+            st = self._settings.value("start_time", "", type=str) or ""
+            et = self._settings.value("end_time", "", type=str) or ""
+            if st:
+                self.start_time_edit.setText(st)
+            if et:
+                self.end_time_edit.setText(et)
+            prec = self._settings.value("precision", False)
+            if isinstance(prec, str):
+                prec = prec.lower() in {"1", "true", "yes", "on"}
+            self.precision_check.setChecked(bool(prec))
+            ao = self._settings.value("auto_open", False)
+            if isinstance(ao, str):
+                ao = ao.lower() in {"1", "true", "yes", "on"}
+            self.auto_open_check.setChecked(bool(ao))
+            # Restore window geometry (size/position)
+            geom = self._settings.value("window_geometry", None, type=QtCore.QByteArray)
+            if geom:
+                try:
+                    self.restoreGeometry(geom)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def _save_settings(self) -> None:
+        try:
+            self._settings.setValue("last_output_dir", self.out_edit.text().strip())
+            self._settings.setValue("last_video_path", self.video_edit.text().strip())
+            self._settings.setValue("start_time", self.start_time_edit.text().strip())
+            self._settings.setValue("end_time", self.end_time_edit.text().strip())
+            self._settings.setValue("precision", self.precision_check.isChecked())
+            self._settings.setValue("auto_open", self.auto_open_check.isChecked())
+            # Save window geometry (size/position)
+            self._settings.setValue("window_geometry", self.saveGeometry())
+        except Exception:
+            pass
 
     # ------------- UI actions -------------
     def update_metadata_for_path(self, path: str) -> None:
@@ -894,6 +958,10 @@ class MainWindow(QtWidgets.QMainWindow):
         # prefill output to video's directory if empty
         if not self.out_edit.text():
             self.out_edit.setText(str(Path(path).parent))
+        try:
+            self._settings.setValue("last_video_path", path)
+        except Exception:
+            pass
         # Rich metadata via ffprobe
         meta = probe_video_metadata_with_ffprobe(path)
         self._current_meta = meta  # store for validation/use
@@ -933,6 +1001,10 @@ class MainWindow(QtWidgets.QMainWindow):
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose output folder", str(Path.home()))
         if path:
             self.out_edit.setText(path)
+            try:
+                self._settings.setValue("last_output_dir", path)
+            except Exception:
+                pass
 
     def on_start(self) -> None:
         video = self.video_edit.text().strip()
@@ -984,6 +1056,9 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_out_btn.setEnabled(False)
         self._started_at = time.time()
         self._total_for_run = None
+
+        # Persist current selections
+        self._save_settings()
 
         # Start worker thread
         self._thread = QtCore.QThread(self)
@@ -1039,6 +1114,9 @@ class MainWindow(QtWidgets.QMainWindow):
         # Hide status after finishing to keep UI minimal
         if success and not canceled:
             self.status.setVisible(False)
+            # Auto-open output folder if requested
+            if self.auto_open_check.isChecked() and out_dir:
+                self._open_dir(out_dir)
         elif canceled:
             # Briefly show canceled message, then hide; for simplicity, just hide immediately
             self.status.setVisible(False)
@@ -1085,6 +1163,52 @@ class MainWindow(QtWidgets.QMainWindow):
         close_btn.clicked.connect(dlg.accept)
         dlg.exec()
 
+    # -------- Open output helpers --------
+    def _open_dir(self, path: str) -> None:
+        try:
+            p = Path(path)
+            if not p.exists():
+                QtWidgets.QMessageBox.warning(self, "Missing folder", f"Folder does not exist:\n{path}")
+                return
+            url = QtCore.QUrl.fromLocalFile(str(p))
+            if not QtGui.QDesktopServices.openUrl(url):
+                # Fallback per-OS
+                if sys.platform.startswith("win"):
+                    os.startfile(str(p))  # type: ignore[attr-defined]
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", str(p)])
+                else:
+                    subprocess.Popen(["xdg-open", str(p)])
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Open folder failed", f"Could not open folder:\n{e}")
+
+    def on_open_out(self) -> None:
+        path = self._last_out_dir or self.out_edit.text().strip()
+        if not path:
+            QtWidgets.QMessageBox.information(self, "No folder", "No output folder available yet.")
+            return
+        self._open_dir(path)
+
+    def on_open_in(self) -> None:
+        path = self.video_edit.text().strip()
+        if not path:
+            QtWidgets.QMessageBox.information(self, "No input", "No input video selected yet.")
+            return
+        p = Path(path)
+        parent = p.parent if p.parent != p else p
+        if p.exists():
+            # Open containing folder of the selected video
+            self._open_dir(str(parent))
+        else:
+            # If file missing, try opening its parent folder if it exists
+            if parent.exists():
+                self._open_dir(str(parent))
+            else:
+                QtWidgets.QMessageBox.warning(self, "Missing folder", f"Input path does not exist:\n{path}")
+
+    def _on_video_text_changed(self, _text: str) -> None:
+        self.open_in_btn.setEnabled(bool(self.video_edit.text().strip()))
+
     # Drag-and-drop support
     def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
         mime = event.mimeData()
@@ -1123,6 +1247,8 @@ class MainWindow(QtWidgets.QMainWindow):
         # Best-effort shutdown: don't call methods on possibly-deleted QThread
         w = self._worker
         th = self._thread
+        # Save settings on close
+        self._save_settings()
         if w is not None:
             try:
                 w.cancel()

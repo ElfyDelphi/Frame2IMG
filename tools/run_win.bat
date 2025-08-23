@@ -6,7 +6,7 @@ cd /d "%~dp0.."
 REM Create venv if missing
 if not exist .venv\Scripts\python.exe (
   echo Creating virtual environment...
-  py -3.11 -m venv .venv || goto :err
+  py -3 -m venv .venv || goto :err
 )
 
 REM Activate venv

@@ -3,15 +3,26 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- No changes yet.
+
+## [v0.1.1] - 2025-08-22
 ### Added
-- Windows helper script: `tools/run_win.bat` for one-click venv setup and run.
+- UI: "Open output folder" button (enabled after run) and optional "Open folder when done" checkbox.
+- Persistence: remembers last used input video, output folder, start/end times, and options via `QSettings`.
+- UI: "Open input folder" button next to the video field.
+- Window: remembers window size and position (geometry) via `QSettings`.
+- Title: display app version in the window title.
+
 ### Changed
-- Docs updated for Python-only distribution (no Windows EXE build by default).
-- README: "Windows quick start (Python)" replaces packaging instructions.
-- CONTRIBUTING: removed packaging section; added Windows Python run instructions.
+- Windows helper script now uses `py -3` for version flexibility.
+- README: Windows quick start updated; added macOS quick start snippet.
+- Docs refinements for Python-only distribution.
+
+### Fixed
+- Tooltip text visibility in dark theme (tooltips were showing as blank on hover).
 
 ### Removed
-- Packaging artifacts: `Frame2Image.spec`, `tools/pack_win.ps1`, `tools/pack_win.bat`, `third_party/ffmpeg/`.
+- (From previous cleanup) Packaging artifacts: `Frame2Image.spec`, `tools/pack_win.ps1`, `tools/pack_win.bat`, `third_party/ffmpeg/`.
 - `.gitignore` rules for `third_party/ffmpeg/bin` binaries.
 
 ## [v0.1.0] - 2025-08-22
@@ -33,3 +44,4 @@ All notable changes to this project will be documented in this file.
 - OSS files: `LICENSE` (MIT), `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`
 
 [v0.1.0]: https://github.com/ElfyDelphi/Frame2Image/releases/tag/v0.1.0
+[v0.1.1]: https://github.com/ElfyDelphi/Frame2Image/releases/tag/v0.1.1

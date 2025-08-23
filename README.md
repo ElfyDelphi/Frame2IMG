@@ -10,6 +10,11 @@ A minimal, modern dark-themed GUI to extract every frame from a video into highe
 - Auto GPU detection and acceleration via NVDEC (when supported); CPU fallback otherwise
 - Output saved inside `<video_name>_frames/` subfolder
 - Cross-platform Qt (PySide6) GUI
+- Optional: "Open folder when done" to automatically open the output directory after extraction
+- Remembers last used input video and output folder
+- "Open input folder" button next to the video field
+- Remembers window size and position
+- Version shown in the window title
 
 ## Requirements
 - Python 3.9+
@@ -31,7 +36,8 @@ python app.py
 - Select a video file and an output folder.
 - Optional: set Start/End times to extract only a segment.
 - Optional: enable "Precision frame count (slower)" for exact counts via ffprobe.
-- Click Start. You can Cancel anytime and open the output folder with the folder button.
+- Optional: enable "Open folder when done" to auto-open the output directory when finished.
+- Click Start. You can Cancel anytime. Use the folder button next to the input to open its containing folder, and the folder button in the controls to open the output. The app remembers your last used paths and window size.
 
 ### Time range extraction
 - Formats accepted: `HH:MM:SS(.ms)`, `MM:SS(.ms)`, or plain seconds.
@@ -103,10 +109,10 @@ See `CONTRIBUTING.md` for setup and guidelines.
 Run from source on Windows (no EXE build required):
 
 ```bat
-py -3.11 -m venv .venv
+py -3 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
-py app.py
+py -3 app.py
 ```
 
 Or use helper script (double-click):
@@ -121,3 +127,20 @@ Optional: verify FFmpeg hardware acceleration support:
 ffmpeg -hide_banner -hwaccels
 ```
 You should see `cuda` or `nvdec` for NVIDIA GPU decode. If not, the app will use CPU and the GPU badge will show "GPU: CPU".
+
+## macOS quick start
+
+Run from source on macOS:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python3 app.py
+```
+
+Optional: install FFmpeg via Homebrew (for best compatibility):
+
+```bash
+brew install ffmpeg
+```
