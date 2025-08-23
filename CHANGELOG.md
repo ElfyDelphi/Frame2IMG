@@ -3,7 +3,30 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+
+## [v0.1.2] - 2025-08-22
+### Added
+- TBD
+
 - No changes yet.
+
+## [v0.1.2] - 2025-08-22
+### Added
+- Asynchronous video preview with seek slider and time readout (non-blocking UI).
+- GPU-accelerated extraction path using FFmpeg NVDEC/CUDA when available; auto-detect with CPU fallback.
+- JPEG output option with adjustable quality, alongside lossless PNG.
+- Robust logging across lifecycle: metadata load, preview worker start/errors, extraction start/fallbacks, cancel events, and shutdown cleanup.
+- Smoke test helper: `tools/smoke_test.sh` to guide manual verification of preview, extraction, cancel, GPU path, and shutdown flows.
+
+### Changed
+- README refocused to Linux-only and Python-based usage; expanded troubleshooting and diagnostics.
+- Improved UX copy and status messages during extraction and cancel.
+
+### Fixed
+- More reliable cleanup on close and cancellation with clearer log messages.
+
+### Removed
+- Windows helper script `tools/run_win.bat` (project is Linux-only for now).
 
 ## [v0.1.1] - 2025-08-22
 ### Added

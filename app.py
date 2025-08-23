@@ -7,11 +7,19 @@ import shutil
 import subprocess
 import json
 import time
+import math
+import logging
 
 import cv2
 from PySide6 import QtCore, QtGui, QtWidgets
-
-__version__ = "0.1.1"
+__version__ = "0.1.2"
+# Lightweight logging setup
+logger = logging.getLogger("frame2image")
+if not logging.getLogger().handlers:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
 # -------------------------
 # Probe helpers (ffprobe)
@@ -371,7 +379,8 @@ class FrameExtractorWorker(QtCore.QObject):
     finished = QtCore.Signal(bool, bool, str, int)  # success, canceled, out_dir, frames_saved
     error = QtCore.Signal(str)
 
-    def __init__(self, video_path: str, output_folder: str, start_time: Optional[float] = None, end_time: Optional[float] = None, precision_count: bool = False):
+    def __init__(self, video_path: str, output_folder: str, start_time: Optional[float] = None, end_time: Optional[float] = None, precision_count: bool = False,
+                 out_format: str = "png", jpeg_quality: int = 90, sample_every_n: int = 1, sample_every_t: float = 0.0):
         super().__init__()
         self.video_path = Path(video_path)
         self.output_folder = Path(output_folder)
@@ -379,6 +388,29 @@ class FrameExtractorWorker(QtCore.QObject):
         self.start_time = start_time
         self.end_time = end_time
         self.precision_count = precision_count
+        # Output options
+        of = (out_format or "png").strip().lower()
+        if of in {"jpg", "jpeg"}:
+            of = "jpeg"
+        elif of != "png":
+            of = "png"
+        self.out_format = of  # "png" or "jpeg"
+        self.jpeg_quality = int(max(1, min(100, jpeg_quality)))
+        # Sampling options
+        self.sample_every_n = int(max(1, sample_every_n))
+        self.sample_every_t = float(max(0.0, sample_every_t))
+        logger.debug(
+            "Worker init: video=%s, out=%s, range=(%s,%s), precision=%s, format=%s, jpeg_q=%s, every_n=%s, every_t=%s",
+            self.video_path,
+            self.output_folder,
+            self.start_time,
+            self.end_time,
+            self.precision_count,
+            self.out_format,
+            self.jpeg_quality,
+            self.sample_every_n,
+            self.sample_every_t,
+        )
 
     # --------- FFmpeg helpers ---------
     def _ffmpeg_path(self) -> Optional[str]:
@@ -423,13 +455,14 @@ class FrameExtractorWorker(QtCore.QObject):
             return False
 
     def _run_ffmpeg_nvdec(self, ffmpeg_path: str, out_dir: Path, pad: int, total_frames: int, start_s: Optional[float], end_s: Optional[float]) -> int:
-        """Run FFmpeg with NVDEC (CUDA) to dump frames to PNG. Returns frames_saved.
+        """Run FFmpeg with NVDEC (CUDA) to dump frames respecting output format and sampling. Returns frames_saved.
         Emits progress and respects cancellation.
         """
         # Ensure output dir exists
         out_dir.mkdir(parents=True, exist_ok=True)
-
-        pattern = str(out_dir / f"frame_%0{pad}d.png")
+        # Pattern and quality/filters
+        ext = "jpg" if self.out_format == "jpeg" else "png"
+        pattern = str(out_dir / f"frame_%0{pad}d.{ext}")
         # Build seek args
         seek_args = []
         dur_args = []
@@ -438,6 +471,28 @@ class FrameExtractorWorker(QtCore.QObject):
         if end_s is not None and (start_s is not None) and (end_s > start_s):
             dur = max(0.0, end_s - start_s)
             dur_args += ["-t", f"{dur:.3f}"]
+        # Build sampling filter
+        vf_filters: list[str] = []
+        if self.sample_every_t and self.sample_every_t > 0:
+            try:
+                rate = 1.0 / float(self.sample_every_t)
+                if rate > 0:
+                    vf_filters.append(f"fps=fps={rate:.6f}")
+            except Exception:
+                pass
+        elif self.sample_every_n and self.sample_every_n > 1:
+            # select every Nth decoded frame
+            vf_filters.append(f"select=not(mod(n\\,{self.sample_every_n}))")
+        vsync_args = ["-vsync", "vfr"] if vf_filters else ["-vsync", "0"]
+        # Quality/format args
+        quality_args: list[str] = []
+        if self.out_format == "jpeg":
+            # Map 1..100 -> qscale 31..2 (lower is better)
+            qscale = int(round(31 - (self.jpeg_quality / 100.0) * 29))
+            qscale = max(2, min(31, qscale))
+            quality_args += ["-q:v", str(qscale)]
+        else:
+            quality_args += ["-compression_level", "3"]
         cmd = [
             ffmpeg_path,
             "-hide_banner",
@@ -446,9 +501,10 @@ class FrameExtractorWorker(QtCore.QObject):
             *seek_args,
             "-i", str(self.video_path),
             *dur_args,
-            "-vsync", "0",
+            *( ["-vf", ",".join(vf_filters)] if vf_filters else [] ),
+            *vsync_args,
             "-start_number", "1",
-            "-compression_level", "3",
+            *quality_args,
             pattern,
             "-progress", "pipe:1",
             "-nostats",
@@ -456,6 +512,8 @@ class FrameExtractorWorker(QtCore.QObject):
         ]
 
         self.message.emit("Using FFmpeg (NVDEC) for GPU-accelerated decoding…")
+        logger.info("FFmpeg NVDEC path engaged: %s", ffmpeg_path)
+        logger.debug("FFmpeg command: %s", " ".join(cmd))
         if total_frames > 0:
             self.progress.emit(0, total_frames)
         else:
@@ -498,9 +556,10 @@ class FrameExtractorWorker(QtCore.QObject):
             if self._cancel:
                 # Determine how many files actually exist in case last frame count wasn't read
                 try:
-                    saved = sum(1 for _ in out_dir.glob("frame_*.png"))
+                    saved = sum(1 for _ in out_dir.glob(f"frame_*.{ext}"))
                 except Exception:
                     pass
+                logger.info("FFmpeg NVDEC canceled by user; saved=%d", saved)
                 return saved
 
             if proc.returncode != 0:
@@ -510,12 +569,13 @@ class FrameExtractorWorker(QtCore.QObject):
                         err = proc.stderr.read()
                 except Exception:
                     pass
+                logger.error("FFmpeg NVDEC failed with code %s", proc.returncode)
                 raise RuntimeError(f"FFmpeg failed (exit {proc.returncode}).\n{err}")
 
             if saved == 0:
                 # Fallback to counting files if 'frame=' wasn't seen
                 try:
-                    saved = sum(1 for _ in out_dir.glob("frame_*.png"))
+                    saved = sum(1 for _ in out_dir.glob(f"frame_*.{ext}"))
                 except Exception:
                     saved = 0
             return saved
@@ -534,6 +594,7 @@ class FrameExtractorWorker(QtCore.QObject):
     @QtCore.Slot()
     def run(self) -> None:
         try:
+            logger.info("Worker run start: %s", self.video_path)
             if not self.video_path.exists():
                 raise FileNotFoundError(f"Video not found: {self.video_path}")
 
@@ -582,6 +643,34 @@ class FrameExtractorWorker(QtCore.QObject):
                 else:
                     frames_in_range = 0
 
+            # Adjust expected total for sampling
+            frames_planned = frames_in_range
+            if self.sample_every_t and self.sample_every_t > 0:
+                # Estimate by duration window / T
+                window_dur = None
+                try:
+                    if end_s is not None:
+                        window_dur = max(0.0, end_s - start_s)
+                    else:
+                        d = meta.get("duration")
+                        if d is not None:
+                            window_dur = max(0.0, float(d) - start_s)
+                except Exception:
+                    window_dur = None
+                if window_dur is not None and window_dur > 0:
+                    try:
+                        frames_planned = max(1, int(math.floor(window_dur / self.sample_every_t)) + 1)
+                    except Exception:
+                        frames_planned = 0
+                else:
+                    # Unknown
+                    frames_planned = 0
+            elif self.sample_every_n and self.sample_every_n > 1 and frames_in_range and frames_in_range > 0:
+                try:
+                    frames_planned = int(math.ceil(frames_in_range / self.sample_every_n))
+                except Exception:
+                    frames_planned = frames_in_range
+
             # Build output directory: <chosen_out>/<video_stem>_frames or unique suffix
             base_out = self.output_folder / f"{self.video_path.stem}_frames"
             out_dir = base_out
@@ -593,27 +682,30 @@ class FrameExtractorWorker(QtCore.QObject):
             out_dir.mkdir(parents=True, exist_ok=True)
 
             # Filename padding
-            pad = len(str(frames_in_range)) if frames_in_range and frames_in_range > 0 else 6
+            pad = len(str(frames_planned)) if frames_planned and frames_planned > 0 else 6
 
             # Prefer FFmpeg with NVDEC (CUDA) if available; fall back to OpenCV
             ffmpeg_path = self._ffmpeg_path()
             if ffmpeg_path and self._ffmpeg_supports_cuda(ffmpeg_path):
                 try:
-                    saved = self._run_ffmpeg_nvdec(ffmpeg_path, out_dir, pad, frames_in_range or 0, start_s if self.start_time else 0.0, end_s)
+                    saved = self._run_ffmpeg_nvdec(ffmpeg_path, out_dir, pad, frames_planned or 0, start_s if self.start_time else 0.0, end_s)
                     if self._cancel:
                         self.message.emit("Canceled by user.")
                         self.finished.emit(False, True, str(out_dir), saved)
                     else:
-                        if frames_in_range and frames_in_range > 0:
-                            self.progress.emit(min(saved, frames_in_range), frames_in_range)
+                        if frames_planned and frames_planned > 0:
+                            self.progress.emit(min(saved, frames_planned), frames_planned)
                         self.message.emit("Done.")
                         self.finished.emit(True, False, str(out_dir), saved)
+                    logger.info("Worker completed via FFmpeg NVDEC: canceled=%s saved=%d", self._cancel, saved)
                     return
                 except Exception as e_ff:
                     # Inform user and continue with CPU fallback
                     self.message.emit(f"FFmpeg GPU path failed, falling back to CPU (OpenCV)…\n{e_ff}")
+                    logger.warning("FFmpeg NVDEC path failed; falling back to OpenCV: %s", e_ff)
 
             # ---------- OpenCV CPU fallback ----------
+            logger.info("Starting OpenCV CPU fallback for extraction")
             cap = cv2.VideoCapture(str(self.video_path))
             if not cap.isOpened():
                 raise RuntimeError("Failed to open video. Try installing codecs/FFmpeg or a different file.")
@@ -625,7 +717,13 @@ class FrameExtractorWorker(QtCore.QObject):
                 except Exception:
                     pass
 
-            png_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]  # lossless; 0-9 only changes size/speed
+            # Choose output format params
+            if self.out_format == "jpeg":
+                img_params = [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality]
+                out_ext = "jpg"
+            else:
+                img_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]  # lossless; 0-9 only changes size/speed
+                out_ext = "png"
 
             self.message.emit("Starting extraction…")
             if frames_in_range and frames_in_range > 0:
@@ -635,6 +733,7 @@ class FrameExtractorWorker(QtCore.QObject):
 
             saved = 0
             throttle = 10  # emit progress every N frames to reduce signal overhead
+            frame_index = 0  # count of frames read
             fps_eff = None
             if not fps_val or fps_val <= 0:
                 try:
@@ -654,15 +753,22 @@ class FrameExtractorWorker(QtCore.QObject):
                     except Exception:
                         end_limit_frames = None
                 end_limit_ms = self.end_time * 1000.0
+            # For time-based sampling, track next timestamp to save
+            next_ms = None
+            if self.sample_every_t and self.sample_every_t > 0:
+                try:
+                    next_ms = (self.start_time or 0.0) * 1000.0
+                except Exception:
+                    next_ms = None
 
             while not self._cancel:
                 ret, frame = cap.read()
                 if not ret:
                     break
-                saved += 1
+                frame_index += 1
 
                 # Stop at end time if defined
-                if end_limit_frames is not None and saved >= end_limit_frames:
+                if end_limit_frames is not None and frame_index >= end_limit_frames:
                     break
                 if end_limit_ms is not None:
                     try:
@@ -672,14 +778,39 @@ class FrameExtractorWorker(QtCore.QObject):
                     except Exception:
                         pass
 
-                filename = out_dir / f"frame_{saved:0{pad}d}.png"
-                ok = cv2.imwrite(str(filename), frame, png_params)
-                if not ok:
-                    raise RuntimeError(f"Failed to write frame to {filename}")
+                # Decide whether to save this frame based on sampling settings
+                do_save = False
+                if self.sample_every_t and self.sample_every_t > 0:
+                    pos_ms = None
+                    try:
+                        pos_ms = cap.get(cv2.CAP_PROP_POS_MSEC)
+                    except Exception:
+                        pos_ms = None
+                    if (pos_ms is None) and fps_eff:
+                        try:
+                            pos_ms = (frame_index - 1) * (1000.0 / float(fps_eff))
+                        except Exception:
+                            pos_ms = None
+                    if next_ms is None and pos_ms is not None:
+                        next_ms = pos_ms
+                    if pos_ms is not None and next_ms is not None and (pos_ms + 1e-3) >= next_ms:
+                        do_save = True
+                        next_ms = next_ms + (self.sample_every_t * 1000.0)
+                elif self.sample_every_n and self.sample_every_n > 1:
+                    do_save = ((frame_index - 1) % self.sample_every_n == 0)
+                else:
+                    do_save = True
 
-                if frames_in_range and frames_in_range > 0:
-                    if saved % throttle == 0 or saved == frames_in_range:
-                        self.progress.emit(saved, frames_in_range)
+                if do_save:
+                    filename = out_dir / f"frame_{saved + 1:0{pad}d}.{out_ext}"
+                    ok = cv2.imwrite(str(filename), frame, img_params)
+                    if not ok:
+                        raise RuntimeError(f"Failed to write frame to {filename}")
+                    saved += 1
+
+                if frames_planned and frames_planned > 0:
+                    if saved % throttle == 0 or saved == frames_planned:
+                        self.progress.emit(saved, frames_planned)
                 else:
                     if saved % throttle == 0:
                         self.progress.emit(saved, 0)
@@ -689,12 +820,14 @@ class FrameExtractorWorker(QtCore.QObject):
             if self._cancel:
                 self.message.emit("Canceled by user.")
                 self.finished.emit(False, True, str(out_dir), saved)
+                logger.info("Worker canceled during OpenCV path; saved=%d", saved)
             else:
                 # Final progress update
-                if frames_in_range and frames_in_range > 0:
-                    self.progress.emit(min(saved, frames_in_range), frames_in_range)
+                if frames_planned and frames_planned > 0:
+                    self.progress.emit(min(saved, frames_planned), frames_planned)
                 self.message.emit("Done.")
                 self.finished.emit(True, False, str(out_dir), saved)
+                logger.info("Worker finished (OpenCV path); saved=%d", saved)
         except Exception as e:
             # Best-effort cleanup of any OpenCV handles
             cap = locals().get('cap', None)
@@ -711,15 +844,90 @@ class FrameExtractorWorker(QtCore.QObject):
                     pass
             err = f"Error: {e}\n\n{traceback.format_exc()}"
             self.error.emit(err)
+            logger.exception("Worker error: %s", e)
 
     def cancel(self) -> None:
         self._cancel = True
+        logger.info("Worker cancel requested")
 
 
 # -------------------------
 # Main Window
 # -------------------------
 class MainWindow(QtWidgets.QMainWindow):
+    # Queued signal to request preview decoding at a specific millisecond timestamp
+    preview_request_ms = QtCore.Signal(float)
+
+    class _PreviewWorker(QtCore.QObject):
+        frame_ready = QtCore.Signal(QtGui.QImage, float)
+        error = QtCore.Signal(str)
+
+        def __init__(self, video_path: str):
+            super().__init__()
+            self.video_path = str(video_path)
+            self._cap: Optional[cv2.VideoCapture] = None
+            self._pending_ms: Optional[float] = None
+            self._working: bool = False
+
+        @QtCore.Slot()
+        def close(self) -> None:
+            cap = self._cap
+            self._cap = None
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+
+        @QtCore.Slot(float)
+        def request_ms(self, ms: float) -> None:
+            # Coalesce requests: always keep latest request and process sequentially
+            self._pending_ms = float(ms)
+            if not self._working:
+                self._process()
+
+        def _ensure_cap(self) -> bool:
+            if self._cap is None:
+                c = cv2.VideoCapture(self.video_path)
+                if not c.isOpened():
+                    self.error.emit("Preview unavailable (failed to open video)")
+                    return False
+                self._cap = c
+            return True
+
+        def _process(self) -> None:
+            if self._working:
+                return
+            self._working = True
+            try:
+                while self._pending_ms is not None:
+                    ms = float(self._pending_ms)
+                    self._pending_ms = None
+                    if not self._ensure_cap():
+                        break
+                    try:
+                        self._cap.set(cv2.CAP_PROP_POS_MSEC, ms)
+                    except Exception:
+                        pass
+                    ok, frame = self._cap.read()
+                    if not ok or frame is None:
+                        # Some codecs need an extra read after seek
+                        ok, frame = self._cap.read()
+                    if not ok or frame is None:
+                        self.error.emit("Preview unavailable")
+                        continue
+                    try:
+                        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        h, w, ch = rgb.shape
+                        bytes_per_line = ch * w
+                        qimg = QtGui.QImage(rgb.data, w, h, bytes_per_line, QtGui.QImage.Format_RGB888).copy()
+                        self.frame_ready.emit(qimg, ms)
+                    except Exception as e:
+                        self.error.emit(f"Preview conversion failed: {e}")
+                        continue
+            finally:
+                self._working = False
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"Frame2Image v{__version__}")
@@ -732,6 +940,16 @@ class MainWindow(QtWidgets.QMainWindow):
         self._total_for_run: Optional[int] = None
         self._has_cuda: Optional[bool] = None
         self._settings: QtCore.QSettings = QtCore.QSettings("ElfyDelphi", "Frame2Image")
+
+        # Preview state
+        self._preview_cap: Optional[cv2.VideoCapture] = None
+        self._preview_duration_ms: Optional[float] = None
+        self._preview_window_start_ms: float = 0.0
+        self._preview_window_end_ms: Optional[float] = None
+        self._last_preview_qimg: Optional[QtGui.QImage] = None
+        # Async preview decoding
+        self._preview_thread: Optional[QtCore.QThread] = None
+        self._preview_worker: Optional['MainWindow._PreviewWorker'] = None
 
         # Enable drag and drop for quick video selection
         self.setAcceptDrops(True)
@@ -826,6 +1044,76 @@ class MainWindow(QtWidgets.QMainWindow):
 
         layout.addWidget(in_group)
 
+        # Preview group
+        preview_group = QtWidgets.QGroupBox("Preview")
+        preview_layout = QtWidgets.QVBoxLayout(preview_group)
+        preview_layout.setSpacing(8)
+        self.preview_label = QtWidgets.QLabel("No video selected")
+        self.preview_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.preview_label.setMinimumHeight(220)
+        self.preview_label.setStyleSheet("background: #111; border: 1px solid #333; border-radius: 6px;")
+        self.preview_label.setSizePolicy(QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding)
+        self.preview_label.setVisible(True)
+        # Re-scale the last preview image when the label resizes
+        self.preview_label.installEventFilter(self)
+        preview_layout.addWidget(self.preview_label, 1)
+
+        preview_controls = QtWidgets.QHBoxLayout()
+        preview_controls.setSpacing(8)
+        self.preview_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.preview_slider.setRange(0, 1000)
+        self.preview_slider.setEnabled(False)
+        self.preview_time_label = QtWidgets.QLabel("--:-- / --:--")
+        self.preview_time_label.setStyleSheet("color: #bbbbbb;")
+        preview_controls.addWidget(self.preview_slider, 1)
+        preview_controls.addWidget(self.preview_time_label)
+        preview_layout.addLayout(preview_controls)
+
+        layout.addWidget(preview_group)
+
+        # Output options and sampling group (no visible title)
+        opts_group = QtWidgets.QGroupBox()
+        opts_layout = QtWidgets.QGridLayout(opts_group)
+        opts_layout.setVerticalSpacing(10)
+        opts_layout.setHorizontalSpacing(10)
+
+        # Output format
+        opts_layout.addWidget(QtWidgets.QLabel("Output format"), 0, 0)
+        self.format_combo = QtWidgets.QComboBox()
+        self.format_combo.addItem("PNG (lossless)", userData="png")
+        self.format_combo.addItem("JPEG (lossy)", userData="jpeg")
+        self.format_combo.setToolTip("Choose image format for extracted frames")
+        opts_layout.addWidget(self.format_combo, 0, 1)
+
+        # JPEG quality
+        self.quality_label = QtWidgets.QLabel("Quality: 90")
+        self.quality_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.quality_slider.setRange(1, 100)
+        self.quality_slider.setValue(90)
+        self.quality_slider.setToolTip("JPEG quality (higher = better quality and size)")
+        opts_layout.addWidget(self.quality_label, 1, 0)
+        opts_layout.addWidget(self.quality_slider, 1, 1)
+
+        # Sampling controls
+        opts_layout.addWidget(QtWidgets.QLabel("Sample every Nth frame"), 2, 0)
+        self.sample_n_spin = QtWidgets.QSpinBox()
+        self.sample_n_spin.setRange(1, 1000000)
+        self.sample_n_spin.setValue(1)
+        self.sample_n_spin.setToolTip("Save one out of every N frames (1 = all frames)")
+        opts_layout.addWidget(self.sample_n_spin, 2, 1)
+
+        opts_layout.addWidget(QtWidgets.QLabel("Or every T seconds"), 3, 0)
+        self.sample_t_spin = QtWidgets.QDoubleSpinBox()
+        self.sample_t_spin.setRange(0.0, 1e6)
+        self.sample_t_spin.setDecimals(3)
+        self.sample_t_spin.setSingleStep(0.1)
+        self.sample_t_spin.setValue(0.0)
+        self.sample_t_spin.setSuffix(" s")
+        self.sample_t_spin.setToolTip("Time-based sampling; if > 0, overrides Nth frame option")
+        opts_layout.addWidget(self.sample_t_spin, 3, 1)
+
+        layout.addWidget(opts_group)
+
         # Controls group (no visible title)
         ctl_group = QtWidgets.QGroupBox()
         ctl_layout = QtWidgets.QHBoxLayout(ctl_group)
@@ -901,6 +1189,21 @@ class MainWindow(QtWidgets.QMainWindow):
         self.open_out_btn.clicked.connect(self.on_open_out)
         self.open_in_btn.clicked.connect(self.on_open_in)
         self.video_edit.textChanged.connect(self._on_video_text_changed)
+        # Preview interactions
+        self.preview_slider.valueChanged.connect(self._on_preview_slider_changed)
+        # Update preview window when time range changes
+        self.start_time_edit.editingFinished.connect(self._on_time_range_changed)
+        self.end_time_edit.editingFinished.connect(self._on_time_range_changed)
+        # Format/quality
+        def on_fmt_change():
+            fmt = (self.format_combo.currentData() or "png").lower()
+            is_jpeg = fmt == "jpeg"
+            self.quality_slider.setEnabled(is_jpeg)
+            self.quality_label.setEnabled(is_jpeg)
+        self.format_combo.currentIndexChanged.connect(on_fmt_change)
+        self.quality_slider.valueChanged.connect(lambda v: self.quality_label.setText(f"Quality: {v}"))
+        # Initialize enabled state
+        QtCore.QTimer.singleShot(0, on_fmt_change)
 
     # -------- Settings helpers --------
     def _load_settings(self) -> None:
@@ -927,6 +1230,30 @@ class MainWindow(QtWidgets.QMainWindow):
             if isinstance(ao, str):
                 ao = ao.lower() in {"1", "true", "yes", "on"}
             self.auto_open_check.setChecked(bool(ao))
+            # Output format and quality
+            fmt = self._settings.value("out_format", "png", type=str) or "png"
+            idx = max(0, self.format_combo.findData(fmt))
+            self.format_combo.setCurrentIndex(idx)
+            q = self._settings.value("jpeg_quality", 90)
+            try:
+                q = int(q)
+            except Exception:
+                q = 90
+            q = max(1, min(100, q))
+            self.quality_slider.setValue(q)
+            # Sampling
+            n = self._settings.value("sample_every_n", 1)
+            try:
+                n = int(n)
+            except Exception:
+                n = 1
+            self.sample_n_spin.setValue(max(1, n))
+            t = self._settings.value("sample_every_t", 0.0)
+            try:
+                t = float(t)
+            except Exception:
+                t = 0.0
+            self.sample_t_spin.setValue(max(0.0, t))
             # Restore window geometry (size/position)
             geom = self._settings.value("window_geometry", None, type=QtCore.QByteArray)
             if geom:
@@ -945,6 +1272,11 @@ class MainWindow(QtWidgets.QMainWindow):
             self._settings.setValue("end_time", self.end_time_edit.text().strip())
             self._settings.setValue("precision", self.precision_check.isChecked())
             self._settings.setValue("auto_open", self.auto_open_check.isChecked())
+            # New options
+            self._settings.setValue("out_format", (self.format_combo.currentData() or "png"))
+            self._settings.setValue("jpeg_quality", int(self.quality_slider.value()))
+            self._settings.setValue("sample_every_n", int(self.sample_n_spin.value()))
+            self._settings.setValue("sample_every_t", float(self.sample_t_spin.value()))
             # Save window geometry (size/position)
             self._settings.setValue("window_geometry", self.saveGeometry())
         except Exception:
@@ -972,6 +1304,17 @@ class MainWindow(QtWidgets.QMainWindow):
         w = meta.get("width")
         h = meta.get("height")
         codec = meta.get("codec")
+        logger.info(
+            "Loaded metadata for %s: frames=%s exact=%s fps=%s dur=%s size=%sx%s codec=%s",
+            path,
+            frames,
+            frames_exact,
+            fps,
+            dur,
+            w,
+            h,
+            codec,
+        )
         parts = []
         if w and h:
             parts.append(f"{w}x{h}")
@@ -988,106 +1331,261 @@ class MainWindow(QtWidgets.QMainWindow):
         self.meta_label.setText(text)
         self.meta_label.setVisible(True)
 
+        # Initialize preview for this video
+        self._init_preview_for_current_video()
+
+    # ------- Preview helpers (class methods) -------
+    def _close_preview_cap(self) -> None:
+        cap = self._preview_cap
+        self._preview_cap = None
+        if cap is not None:
+            try:
+                cap.release()
+            except Exception:
+                pass
+        # Also stop preview worker thread if running
+        th = getattr(self, "_preview_thread", None)
+        worker = getattr(self, "_preview_worker", None)
+        self._preview_worker = None
+        if worker is not None:
+            try:
+                worker.close()
+            except Exception:
+                pass
+        if th is not None:
+            try:
+                th.quit()
+                th.wait(800)
+            except Exception:
+                pass
+            self._preview_thread = None
+        logger.debug("Preview resources closed")
+
+    def _init_preview_for_current_video(self) -> None:
+        path = self.video_edit.text().strip()
+        self._close_preview_cap()
+        self._last_preview_qimg = None
+        self.preview_label.setText("Loading preview…" if path else "No video selected")
+        self.preview_label.setPixmap(QtGui.QPixmap())
+        self.preview_slider.setEnabled(False)
+        self.preview_time_label.setText("--:-- / --:--")
+        if not path or not Path(path).exists():
+            logger.info("Preview init skipped: missing path")
+            return
+        tmp_cap = cv2.VideoCapture(path)
+        if not tmp_cap.isOpened():
+            self.preview_label.setText("Preview unavailable (failed to open video)")
+            logger.warning("Preview failed to open video: %s", path)
+            return
+        # Determine duration (prefer metadata if available)
+        dur_ms: Optional[float] = None
+        try:
+            meta = getattr(self, "_current_meta", None) or {}
+            d = meta.get("duration") if isinstance(meta, dict) else None
+            if d is not None:
+                dur_ms = float(d) * 1000.0
+        except Exception:
+            dur_ms = None
+        if not dur_ms or dur_ms <= 0:
+            try:
+                frame_count = tmp_cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                fps = tmp_cap.get(cv2.CAP_PROP_FPS)
+                if frame_count and fps and fps > 0:
+                    dur_ms = float(frame_count) / float(fps) * 1000.0
+            except Exception:
+                dur_ms = None
+        try:
+            tmp_cap.release()
+        except Exception:
+            pass
+        self._preview_duration_ms = dur_ms if dur_ms and dur_ms > 0 else None
+        # Start background preview worker
+        try:
+            th = QtCore.QThread(self)
+            worker = MainWindow._PreviewWorker(path)
+            worker.moveToThread(th)
+            self.preview_request_ms.connect(worker.request_ms)
+            worker.frame_ready.connect(self._on_preview_frame_ready)
+            worker.error.connect(self._on_preview_error)
+            th.finished.connect(worker.deleteLater)
+            self._preview_thread = th
+            self._preview_worker = worker
+            th.start()
+            logger.info("Preview worker started for %s (duration_ms=%s)", path, self._preview_duration_ms)
+        except Exception:
+            self._preview_thread = None
+            self._preview_worker = None
+            logger.exception("Failed to start preview worker for %s", path)
+        # Update slider and show first frame
+        self._refresh_preview_window_and_show(start_ratio=0.0)
+
+    def _get_time_window_ms(self) -> tuple[float, Optional[float]]:
+        total_ms = self._preview_duration_ms or 0.0
+        st = parse_time_to_seconds(self.start_time_edit.text()) if hasattr(self, 'start_time_edit') else None
+        et = parse_time_to_seconds(self.end_time_edit.text()) if hasattr(self, 'end_time_edit') else None
+        st_ms = max(0.0, float(st) * 1000.0) if st is not None else 0.0
+        end_ms = None
+        if et is not None:
+            end_ms = max(0.0, float(et) * 1000.0)
+            if total_ms > 0:
+                end_ms = min(end_ms, total_ms)
+            if end_ms <= st_ms:
+                # invalid range -> ignore end
+                end_ms = None
+        if (end_ms is None) and total_ms > 0:
+            end_ms = total_ms
+        # Clamp start to total
+        if total_ms > 0 and st_ms >= total_ms:
+            st_ms = max(0.0, total_ms - 1.0)
+        return st_ms, end_ms
+
+    def _refresh_preview_window_and_show(self, start_ratio: float = 0.0) -> None:
+        # Compute window
+        st_ms, end_ms = self._get_time_window_ms()
+        self._preview_window_start_ms = st_ms
+        self._preview_window_end_ms = end_ms
+        have_cap = self._preview_cap is not None
+        have_dur = (self._preview_duration_ms is not None) and (self._preview_duration_ms > 0)
+        can_seek = have_cap and end_ms is not None and end_ms > st_ms and have_dur
+        self.preview_slider.setEnabled(bool(can_seek))
+        if can_seek:
+            # Set slider to start and show frame
+            v = int(max(0, min(1000, round(start_ratio * 1000.0))))
+            # Block signals during programmatic update
+            try:
+                self.preview_slider.blockSignals(True)
+                self.preview_slider.setValue(v)
+            finally:
+                self.preview_slider.blockSignals(False)
+            self._show_preview_at_ratio(v / 1000.0)
+        else:
+            # Still try to show first frame
+            self._show_preview_at_ms(st_ms)
+
+    def _on_time_range_changed(self) -> None:
+        # When time range edits change, recompute window and show start
+        self._refresh_preview_window_and_show(start_ratio=0.0)
+
+    def _on_preview_slider_changed(self, value: int) -> None:
+        r = max(0.0, min(1.0, float(value) / 1000.0))
+        self._show_preview_at_ratio(r)
+
+    def _update_preview_time_label(self, cur_ms: Optional[float]) -> None:
+        total_s = (self._preview_duration_ms or 0.0) / 1000.0
+        cur_s = (cur_ms or 0.0) / 1000.0
+        self.preview_time_label.setText(f"{format_seconds(cur_s)} / {format_seconds(total_s)}")
+
+    def _show_preview_at_ratio(self, r: float) -> None:
+        st_ms = self._preview_window_start_ms or 0.0
+        end_ms = self._preview_window_end_ms
+        if end_ms is None or end_ms <= st_ms:
+            # Fallback to absolute 0..duration
+            total = self._preview_duration_ms or 0.0
+            target_ms = r * total
+        else:
+            target_ms = st_ms + r * max(0.0, (end_ms - st_ms))
+        self._show_preview_at_ms(target_ms)
+
+    def _show_preview_at_ms(self, ms: float) -> None:
+        # Request async decoding in the background thread (queued connection)
+        if self._preview_worker is not None:
+            try:
+                self.preview_request_ms.emit(float(ms))
+            except Exception:
+                # As a fallback, try direct call (may run in current thread)
+                try:
+                    self._preview_worker.request_ms(float(ms))
+                except Exception:
+                    pass
+            return
+        # Fallback UI message if worker is not available yet
+        self.preview_label.setText("Loading preview…")
+
+    def _apply_qimage_to_preview_label(self, qimg: QtGui.QImage) -> None:
+        # Scale while keeping aspect ratio to fit label size
+        target_size = self.preview_label.size()
+        if target_size.width() < 2 or target_size.height() < 2:
+            pix = QtGui.QPixmap.fromImage(qimg)
+            self.preview_label.setPixmap(pix)
+            return
+        pix = QtGui.QPixmap.fromImage(qimg)
+        scaled = pix.scaled(target_size, QtCore.Qt.KeepAspectRatio, QtCore.Qt.SmoothTransformation)
+        self.preview_label.setPixmap(scaled)
+
+    def _on_preview_frame_ready(self, qimg: QtGui.QImage, ms: float) -> None:
+        self._last_preview_qimg = qimg
+        self._apply_qimage_to_preview_label(qimg)
+        self._update_preview_time_label(ms)
+
+    def _on_preview_error(self, msg: str) -> None:
+        # If we have an image already, keep showing it; otherwise show message
+        if self._last_preview_qimg is None:
+            self.preview_label.setText(msg or "Preview unavailable")
+        logger.warning("Preview error: %s", msg)
+
     def on_pick_video(self) -> None:
         filters = (
-            "Video Files (*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.mpg *.mpeg *.wmv);;"
-            "All Files (*.*)"
+            "Video Files (*.mp4 *.mov *.avi *.mkv *.webm *.m4v *.mpg *.mpeg *.wmv);;All Files (*)"
         )
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select video", str(Path.home()), filters)
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Select video", str(Path.home()), filters
+        )
         if path:
             self.update_metadata_for_path(path)
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:  # type: ignore[override]
+        try:
+            if obj is getattr(self, "preview_label", None) and event.type() == QtCore.QEvent.Resize:
+                if self._last_preview_qimg is not None:
+                    self._apply_qimage_to_preview_label(self._last_preview_qimg)
+        except Exception:
+            pass
+        return QtWidgets.QMainWindow.eventFilter(self, obj, event)
+
+    # Drag-and-drop support
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile():
+                    p = url.toLocalFile()
+                    path_obj = Path(p)
+                    if path_obj.is_dir():
+                        event.acceptProposedAction()
+                        return
+                    ext = path_obj.suffix.lower()
+                    if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv"}:
+                        event.acceptProposedAction()
+                        return
+        event.ignore()
+
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:  # type: ignore[override]
+        mime = event.mimeData()
+        if mime.hasUrls():
+            for url in mime.urls():
+                if url.isLocalFile():
+                    p = url.toLocalFile()
+                    path_obj = Path(p)
+                    if path_obj.is_dir():
+                        # Treat as output folder
+                        self.out_edit.setText(str(path_obj))
+                        try:
+                            self._settings.setValue("last_output_dir", str(path_obj))
+                        except Exception:
+                            pass
+                        event.acceptProposedAction()
+                        return
+                    ext = path_obj.suffix.lower()
+                    if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv"}:
+                        self.update_metadata_for_path(str(path_obj))
+                        event.acceptProposedAction()
+                        return
+        event.ignore()
 
     def on_pick_out(self) -> None:
         path = QtWidgets.QFileDialog.getExistingDirectory(self, "Choose output folder", str(Path.home()))
         if path:
             self.out_edit.setText(path)
-            try:
-                self._settings.setValue("last_output_dir", path)
-            except Exception:
-                pass
-
-    def on_start(self) -> None:
-        video = self.video_edit.text().strip()
-        out = self.out_edit.text().strip()
-
-        if not video:
-            QtWidgets.QMessageBox.warning(self, "Missing video", "Please select a video file.")
-            return
-        if not Path(video).exists():
-            QtWidgets.QMessageBox.critical(self, "Invalid video", "The selected video file does not exist.")
-            return
-        if not out:
-            QtWidgets.QMessageBox.warning(self, "Missing output", "Please choose an output folder.")
-            return
-        if not Path(out).exists():
-            try:
-                Path(out).mkdir(parents=True, exist_ok=True)
-            except Exception as e:
-                QtWidgets.QMessageBox.critical(self, "Output error", f"Could not create output folder:\n{e}")
-                return
-
-        # Parse time range
-        start_s = parse_time_to_seconds(self.start_time_edit.text()) if hasattr(self, 'start_time_edit') else None
-        end_s = parse_time_to_seconds(self.end_time_edit.text()) if hasattr(self, 'end_time_edit') else None
-        if start_s is not None and start_s < 0:
-            start_s = 0.0
-        if end_s is not None and start_s is not None and end_s <= start_s:
-            QtWidgets.QMessageBox.warning(self, "Invalid range", "End time must be greater than start time.")
-            return
-        # If we know duration, clamp range
-        meta = getattr(self, '_current_meta', None)
-        dur = (meta or {}).get('duration') if isinstance(meta, dict) else None
-        if dur is not None:
-            if start_s is not None and start_s >= dur:
-                QtWidgets.QMessageBox.warning(self, "Invalid start", "Start time is beyond video duration.")
-                return
-            if end_s is not None and end_s > dur:
-                end_s = dur
-
-        precision = self.precision_check.isChecked() if hasattr(self, 'precision_check') else False
-
-        # Prepare UI
-        self._set_busy(True)
-        self.status.setText("Preparing…")
-        self.status.setVisible(True)
-        self.progress.setRange(0, 0)  # busy until we know total
-        self.progress.setValue(0)
-        self.progress.setFormat("Extracting…")
-        self.open_out_btn.setEnabled(False)
-        self._started_at = time.time()
-        self._total_for_run = None
-
-        # Persist current selections
-        self._save_settings()
-
-        # Start worker thread
-        self._thread = QtCore.QThread(self)
-        self._worker = FrameExtractorWorker(video, out, start_time=start_s, end_time=end_s, precision_count=precision)
-        self._worker.moveToThread(self._thread)
-
-        self._thread.started.connect(self._worker.run)
-        self._worker.progress.connect(self.on_progress)
-        self._worker.message.connect(self.status.setText)
-        self._worker.finished.connect(self.on_finished)
-        self._worker.error.connect(self.on_error)
-
-        # Ensure cleanup
-        self._worker.finished.connect(self._thread.quit)
-        self._worker.finished.connect(self._worker.deleteLater)
-        # Also cleanup on error
-        self._worker.error.connect(self._thread.quit)
-        self._worker.error.connect(self._worker.deleteLater)
-        self._thread.finished.connect(self._thread.deleteLater)
-
-        self._thread.start()
-
-    def on_cancel(self) -> None:
-        if self._worker is not None:
-            self._worker.cancel()
-            self.status.setText("Canceling…")
-            self.cancel_btn.setEnabled(False)
-
-    # ... (rest of the code remains the same)
 
     @QtCore.Slot(int, int)
     def on_progress(self, current: int, total: int) -> None:
@@ -1124,6 +1622,19 @@ class MainWindow(QtWidgets.QMainWindow):
             # Keep visible on issues
             self.status.setText("Finished with issues.")
             self.status.setVisible(True)
+        # Log completion summary
+        try:
+            elapsed = (time.time() - self._started_at) if self._started_at else None
+        except Exception:
+            elapsed = None
+        logger.info(
+            "Extraction finished: success=%s canceled=%s frames_saved=%s out_dir=%s elapsed=%s",
+            success,
+            canceled,
+            frames_saved,
+            out_dir,
+            f"{elapsed:.2f}s" if isinstance(elapsed, (int, float)) else "n/a",
+        )
         # Drop references so we don't touch deleted Qt objects later
         self._worker = None
         self._thread = None
@@ -1136,6 +1647,7 @@ class MainWindow(QtWidgets.QMainWindow):
         self.progress.setValue(0)
         self.status.setText("Error occurred.")
         self.status.setVisible(True)
+        logger.error("Extraction error: %s", (err_text or "").splitlines()[0] if err_text else "unknown")
         self.show_error_dialog("Error", err_text)
 
     # Custom error dialog with copy functionality
@@ -1209,46 +1721,140 @@ class MainWindow(QtWidgets.QMainWindow):
     def _on_video_text_changed(self, _text: str) -> None:
         self.open_in_btn.setEnabled(bool(self.video_edit.text().strip()))
 
-    # Drag-and-drop support
-    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:  # type: ignore[override]
-        mime = event.mimeData()
-        if mime.hasUrls():
-            # Accept if any url is a local file with video-like extension
-            for url in mime.urls():
-                if url.isLocalFile():
-                    p = url.toLocalFile()
-                    ext = Path(p).suffix.lower()
-                    if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv"}:
-                        event.acceptProposedAction()
-                        return
-        event.ignore()
-
-    def dropEvent(self, event: QtGui.QDropEvent) -> None:  # type: ignore[override]
-        mime = event.mimeData()
-        if mime.hasUrls():
-            for url in mime.urls():
-                if url.isLocalFile():
-                    p = url.toLocalFile()
-                    ext = Path(p).suffix.lower()
-                    if ext in {".mp4", ".mov", ".avi", ".mkv", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv"}:
-                        self.update_metadata_for_path(p)
-                        event.acceptProposedAction()
-                        return
-        event.ignore()
-
+    # -------- Extraction controls --------
     def _set_busy(self, busy: bool) -> None:
-        self.video_btn.setEnabled(not busy)
-        self.out_btn.setEnabled(not busy)
         self.start_btn.setEnabled(not busy)
         self.cancel_btn.setEnabled(busy)
+        self.video_btn.setEnabled(not busy)
+        self.out_btn.setEnabled(not busy)
+        self.video_edit.setEnabled(not busy)
+        self.out_edit.setEnabled(not busy)
+        self.preview_slider.setEnabled(not busy and self.preview_slider.isEnabled())
+
+    def on_start(self) -> None:
+        video = self.video_edit.text().strip()
+        out = self.out_edit.text().strip()
+        if not video:
+            QtWidgets.QMessageBox.warning(self, "Missing video", "Please select a video file.")
+            return
+        if not Path(video).exists():
+            QtWidgets.QMessageBox.critical(self, "Invalid video", "The selected video file does not exist.")
+            return
+        if not out:
+            QtWidgets.QMessageBox.warning(self, "Missing output", "Please choose an output folder.")
+            return
+        if not Path(out).exists():
+            try:
+                Path(out).mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                QtWidgets.QMessageBox.critical(self, "Output error", f"Could not create output folder:\n{e}")
+                return
+
+        # Parse time range
+        start_s = parse_time_to_seconds(self.start_time_edit.text()) if hasattr(self, 'start_time_edit') else None
+        end_s = parse_time_to_seconds(self.end_time_edit.text()) if hasattr(self, 'end_time_edit') else None
+        if start_s is not None and start_s < 0:
+            start_s = 0.0
+        if end_s is not None and start_s is not None and end_s <= start_s:
+            QtWidgets.QMessageBox.warning(self, "Invalid range", "End time must be greater than start time.")
+            return
+        # Clamp to duration if known
+        meta = getattr(self, '_current_meta', None)
+        dur = (meta or {}).get('duration') if isinstance(meta, dict) else None
+        if dur is not None:
+            if start_s is not None and start_s >= dur:
+                QtWidgets.QMessageBox.warning(self, "Invalid start", "Start time is beyond video duration.")
+                return
+            if end_s is not None and end_s > dur:
+                end_s = dur
+
+        # Prepare UI
+        self._set_busy(True)
+        self.status.setText("Preparing…")
+        self.status.setVisible(True)
+        self.progress.setRange(0, 0)  # busy until we know total
+        self.progress.setValue(0)
+        self.progress.setFormat("Extracting…")
+        self.open_out_btn.setEnabled(False)
+        self._started_at = time.time()
+        self._total_for_run = None
+        logger.info(
+            "Start extraction: video=%s out=%s start=%s end=%s fmt=%s jpeg_q=%s every_n=%s every_t=%s precision=%s",
+            video,
+            out,
+            start_s,
+            end_s,
+            (self.format_combo.currentData() or "png"),
+            int(self.quality_slider.value()),
+            int(self.sample_n_spin.value()),
+            float(self.sample_t_spin.value()),
+            self.precision_check.isChecked(),
+        )
+
+        # Persist current selections
+        self._save_settings()
+
+        # Start worker thread
+        self._thread = QtCore.QThread(self)
+        # Collect options
+        out_format = (self.format_combo.currentData() or "png")
+        jpeg_quality = int(self.quality_slider.value())
+        sample_every_n = int(self.sample_n_spin.value())
+        sample_every_t = float(self.sample_t_spin.value())
+
+        self._worker = FrameExtractorWorker(
+            video,
+            out,
+            start_time=start_s,
+            end_time=end_s,
+            precision_count=self.precision_check.isChecked(),
+            out_format=out_format,
+            jpeg_quality=jpeg_quality,
+            sample_every_n=sample_every_n,
+            sample_every_t=sample_every_t,
+        )
+        self._worker.moveToThread(self._thread)
+
+        self._thread.started.connect(self._worker.run)
+        self._worker.progress.connect(self.on_progress)
+        self._worker.message.connect(self.status.setText)
+        self._worker.finished.connect(self.on_finished)
+        self._worker.error.connect(self.on_error)
+        # Ensure cleanup
+        self._worker.finished.connect(self._thread.quit)
+        self._worker.finished.connect(self._worker.deleteLater)
+        self._worker.error.connect(self._thread.quit)
+        self._worker.error.connect(self._worker.deleteLater)
+        self._thread.finished.connect(self._thread.deleteLater)
+
+        self._thread.start()
+
+    def on_cancel(self) -> None:
+        w = self._worker
+        if w is not None:
+            try:
+                w.cancel()
+            except Exception:
+                pass
+        self.status.setText("Canceling…")
+        self.status.setVisible(True)
+        logger.info("Cancel requested by user")
 
     # Ensure graceful stop on close
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:  # type: ignore[override]
-        # Best-effort shutdown: don't call methods on possibly-deleted QThread
+        # Save settings and stop preview worker/thread
+        logger.info("Main window closing; starting cleanup")
+        try:
+            self._save_settings()
+        except Exception:
+            pass
+        try:
+            self._close_preview_cap()
+        except Exception:
+            pass
+        # Stop extraction worker/thread robustly
         w = self._worker
         th = self._thread
-        # Save settings on close
-        self._save_settings()
         if w is not None:
             try:
                 w.cancel()
@@ -1259,16 +1865,16 @@ class MainWindow(QtWidgets.QMainWindow):
                 th.quit()
                 th.wait(1500)
             except RuntimeError:
-                # Underlying C++ object may already be deleted
                 pass
             except Exception:
                 pass
-        # Clear refs to avoid later access to deleted Qt objects
         self._worker = None
         self._thread = None
         event.accept()
+        logger.info("Cleanup finished; app closed")
 
 
+ 
 def main() -> int:
     app = QtWidgets.QApplication(sys.argv)
     apply_dark_theme(app)
