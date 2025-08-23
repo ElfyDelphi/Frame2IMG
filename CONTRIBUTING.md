@@ -5,7 +5,7 @@ Thanks for your interest in contributing! This project aims to be a simple, high
 ## Ways to contribute
 - Report bugs and edge cases (crashes, unsupported inputs)
 - Suggest small features that align with scope (see README Non‑Goals)
-- Improve docs and packaging (Windows builds, GPU notes)
+- Improve docs and GPU notes
 
 ## Development setup
 ```bash
@@ -25,8 +25,14 @@ python app.py
 - Prefer type hints and clear error messages
 - Keep UI responsive; long work must run off the main thread (see `FrameExtractorWorker` in `app.py`)
 
-## Packaging (Windows)
-- See `tools/pack_win.ps1` / `tools/pack_win.bat`
-- Optional: place `ffmpeg.exe` and `ffprobe.exe` under `third_party/ffmpeg/bin/` before building to bundle them
+## Windows quick start (Python)
+Run from source on Windows (no EXE build required):
+
+```bat
+py -3.11 -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+py app.py
+```
 
 Thanks again!

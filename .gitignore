@@ -35,16 +35,6 @@ Thumbs.db
 .idea/
 .vscode/
 
-# FFmpeg/FFprobe binaries under third_party (keep README/LICENSE text)
-third_party/ffmpeg/bin/**/*.exe
-third_party/ffmpeg/bin/**/*.dll
-third_party/ffmpeg/bin/**/*.pdb
-third_party/ffmpeg/bin/**/*.lib
-third_party/ffmpeg/bin/**/*.dylib
-third_party/ffmpeg/bin/**/*.so
-
-!third_party/ffmpeg/**/*.md
-!third_party/ffmpeg/**/*.txt
 
 # Optional: ignore local ffmpeg/ffprobe placed at repo root during dev
 /ffmpeg.exe

@@ -93,48 +93,22 @@ See `CONTRIBUTING.md` for setup and guidelines.
 
 ## License and third‑party
 - Project license: MIT (see `LICENSE`)
-- FFmpeg/ffprobe are licensed separately (LGPL/GPL depending on build). When distributing binaries, include FFmpeg’s license files and notices. See `third_party/ffmpeg/README.md`.
+- FFmpeg/ffprobe are licensed separately (LGPL/GPL depending on build). This app uses your system FFmpeg/ffprobe when available. If you distribute binaries in the future, include FFmpeg’s license files and notices.
 
-## Windows 11 build (PyInstaller)
+## Windows quick start (Python)
 
-You must build on Windows (PyInstaller does not cross‑compile).
+Run from source on Windows (no EXE build required):
 
-### Quick start
-- PowerShell:
-  ```powershell
-  Set-ExecutionPolicy -Scope Process Bypass -Force
-  .\tools\pack_win.ps1
-  ```
-- CMD:
-  ```bat
-  tools\pack_win.bat
-  ```
-
-This produces `dist/Frame2Image/Frame2Image.exe`.
-
-### Manual steps (alternative)
 ```bat
-py -3.11 -m pip install -r requirements.txt
-py -3.11 -m pip install pyinstaller
-py -3.11 -m PyInstaller Frame2Image.spec --noconfirm
+py -3.11 -m venv .venv
+.\.venv\Scripts\activate
+pip install -r requirements.txt
+py app.py
 ```
 
-### Bundling FFmpeg/FFprobe (optional but recommended)
-- Place the following files under `third_party/ffmpeg/bin/` BEFORE building:
-  - `ffmpeg.exe`
-  - `ffprobe.exe` (enables advanced metadata and precision frame counting)
-  - Any required `.dll` dependencies shipped with your FFmpeg build
-- For GPU decoding on RTX GPUs (NVDEC/CUDA), use an FFmpeg build with NVDEC enabled (e.g., Gyan.dev "full" or BtbN win64 builds).
-- Keep accompanying LICENSE/README files in `third_party/ffmpeg/` for license compliance.
+Optional: verify FFmpeg hardware acceleration support:
 
-### Verify GPU acceleration
-Run in a Windows terminal:
 ```bat
 ffmpeg -hide_banner -hwaccels
 ```
-You should see `cuda` or `nvdec`. If not, the app will fall back to CPU and the GPU badge will show "GPU: CPU".
-
-### Troubleshooting
-- SmartScreen warning: click "More info" > "Run anyway" (unsigned build).
-- Missing GPU badge or slow decode: ensure your FFmpeg build includes NVDEC and that NVIDIA drivers are up to date.
-- Exact total frames not shown: make sure `ffprobe.exe` is present under `third_party/ffmpeg/bin/`.
+You should see `cuda` or `nvdec` for NVIDIA GPU decode. If not, the app will use CPU and the GPU badge will show "GPU: CPU".

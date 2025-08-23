@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+### Changed
+- Docs updated for Python-only distribution (no Windows EXE build by default).
+- README: "Windows quick start (Python)" replaces packaging instructions.
+- CONTRIBUTING: removed packaging section; added Windows Python run instructions.
+
+### Removed
+- Packaging artifacts: `Frame2Image.spec`, `tools/pack_win.ps1`, `tools/pack_win.bat`, `third_party/ffmpeg/`.
+- `.gitignore` rules for `third_party/ffmpeg/bin` binaries.
+
 ## [v0.1.0] - 2025-08-22
 ### Added
 - Minimal, modern dark-themed GUI using PySide6
