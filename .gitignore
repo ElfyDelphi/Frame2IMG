@@ -1,0 +1,53 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+*.pyd
+*.dll
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+pip-wheel-metadata/
+
+# Test/typing caches
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# FFmpeg/FFprobe binaries under third_party (keep README/LICENSE text)
+third_party/ffmpeg/bin/**/*.exe
+third_party/ffmpeg/bin/**/*.dll
+third_party/ffmpeg/bin/**/*.pdb
+third_party/ffmpeg/bin/**/*.lib
+third_party/ffmpeg/bin/**/*.dylib
+third_party/ffmpeg/bin/**/*.so
+
+!third_party/ffmpeg/**/*.md
+!third_party/ffmpeg/**/*.txt
+
+# Optional: ignore local ffmpeg/ffprobe placed at repo root during dev
+/ffmpeg.exe
+/ffprobe.exe
+/ffmpeg
+/ffprobe
