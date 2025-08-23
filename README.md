@@ -27,6 +27,30 @@ pip install -r requirements.txt
 python app.py
 ```
 
+## Usage
+- Select a video file and an output folder.
+- Optional: set Start/End times to extract only a segment.
+- Optional: enable "Precision frame count (slower)" for exact counts via ffprobe.
+- Click Start. You can Cancel anytime and open the output folder with the folder button.
+
+### Time range extraction
+- Formats accepted: `HH:MM:SS(.ms)`, `MM:SS(.ms)`, or plain seconds.
+- End must be greater than Start. If duration is known, values are clamped to the video length.
+
+### Precision frame count
+- Uses `ffprobe -count_frames` for exact counts; may be slow on long videos.
+- When off, the app uses `nb_frames` (if present) or estimates via duration×fps, with OpenCV fallback.
+
+### GPU badge
+- "GPU: NVDEC" means FFmpeg with NVDEC/CUDA will be used for decoding.
+- "GPU: CPU" means GPU decode is unavailable; OpenCV CPU path will be used.
+
+## Screenshots
+Coming soon. You can place screenshots here and they will render on GitHub:
+
+- `assets/screenshots/main.png` (main window)
+- `assets/screenshots/demo.gif` (short extraction demo)
+
 ## GPU acceleration (optional)
 - This app will automatically use FFmpeg with CUDA/NVDEC (GPU) to decode video if available, then save frames as lossless PNG.
 - If FFmpeg with CUDA is not found, it falls back to CPU decoding via OpenCV.
