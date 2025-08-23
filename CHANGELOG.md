@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+### Added
+- Windows helper script: `tools/run_win.bat` for one-click venv setup and run.
 ### Changed
 - Docs updated for Python-only distribution (no Windows EXE build by default).
 - README: "Windows quick start (Python)" replaces packaging instructions.

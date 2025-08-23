@@ -48,6 +48,9 @@ python app.py
 ## Screenshots
 Coming soon. You can place screenshots here and they will render on GitHub:
 
+![Main Window](assets/screenshots/main.png)
+![Demo](assets/screenshots/demo.gif)
+
 - `assets/screenshots/main.png` (main window)
 - `assets/screenshots/demo.gif` (short extraction demo)
 
@@ -104,6 +107,12 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\activate
 pip install -r requirements.txt
 py app.py
+```
+
+Or use helper script (double-click):
+
+```bat
+tools\run_win.bat
 ```
 
 Optional: verify FFmpeg hardware acceleration support:
